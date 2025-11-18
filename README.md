@@ -61,7 +61,7 @@
 
 ### Installation
 
-1. **Download the latest release** from [KothaGPT.ai](https://www.KothaGPT.ai/) or the [GitHub releases page](https://github.com/kothagpt/kotha/releases)
+1. **Download the latest release** from [kotha.khulnasoft.com](https://www.kotha.khulnasoft.com/) or the [GitHub releases page](https://github.com/kothagpt/kotha/releases)
 
 2. **Install the application**:
    - **macOS**: Open the `.dmg` file and drag Kotha to Applications
@@ -332,4 +332,4 @@ This project is licensed under the **GNU General Public License** - see the [LIC
 
 - **Community**: [GitHub Discussions](https://github.com/kothagpt/kotha/discussions)
 - **Issues**: [GitHub Issues](https://github.com/kothagpt/kotha/issues)
-- **Website**: [KothaGPT.ai](https://www.KothaGPT.ai)
+- **Website**: [kotha.khulnasoft.com](https://www.kotha.khulnasoft.com)

@@ -108,7 +108,7 @@ export default function AboutContent() {
 
           <AboutCard
             icon={<Globe className="w-6 h-6 text-black" />}
-            title="KothaGPT.ai"
+            title="kotha.khulnasoft.com"
             description="Learn more about Kotha, explore features, and see what's next."
             buttonText="Go to Website"
             onClick={handleWebsiteClick}
