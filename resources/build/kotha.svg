@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240">
+  <defs>
+    <style>
+      .bn {
+        font-family: "Noto Sans Bengali";
+        font-size: 40px;
+        font-weight: 700;
+        fill: #ffffff;
+      }
+    </style>
+
+    <!-- Soft inner shadow -->
+    <filter id="innerShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feOffset dx="0" dy="2" />
+      <feGaussianBlur stdDeviation="6" result="offset-blur"/>
+      <feComposite operator="out" in="SourceGraphic" in2="offset-blur" result="inverse"/>
+      <feFlood flood-color="rgba(0,0,0,0.30)" result="color"/>
+      <feComposite operator="in" in="color" in2="inverse" result="shadow"/>
+      <feComposite operator="over" in="shadow" in2="SourceGraphic"/>
+    </filter>
+
+    <!-- Gloss highlight -->
+    <radialGradient id="gloss" cx="50%" cy="20%" r="80%">
+      <stop offset="0%" stop-color="rgba(255,255,255,0.35)" />
+      <stop offset="100%" stop-color="rgba(255,255,255,0)" />
+    </radialGradient>
+  </defs>
+
+  <!-- Main green circle -->
+  <circle cx="120" cy="120" r="110" fill="#006A4E" filter="url(#innerShadow)"/>
+
+  <!-- Subtle gloss -->
+  <circle cx="120" cy="100" r="95" fill="url(#gloss)"/>
+
+  <!-- Bangladesh red circle (clean, centered visually) -->
+  <circle cx="165" cy="88" r="34" fill="#F42A41" opacity="0.92"/>
+
+  <!-- Speech bubble body (slightly brighter stroke, improved curve) -->
+  <path d="M60 92a48 48 0 0 1 96 0v12a48 48 0 0 1 -96 0z"
+        fill="rgba(255,255,255,0.08)"
+        stroke="rgba(255,255,255,0.22)"
+        stroke-width="2"
+        transform="translate(0,10)"/>
+
+  <!-- Tail (tighter, more geometric) -->
+  <path d="M120 148l-12 26l18-8l18 8l-12 -26z"
+        fill="#006A4E"
+        stroke="rgba(255,255,255,0.10)"
+        stroke-width="1.5"/>
+
+  <!-- Waveform (improved harmonics, golden-tan color for BD theme) -->
+  <g transform="translate(56,60)" fill="#FFE4DA">
+    <rect x="0" y="18" width="6" height="36" rx="3"/>
+    <rect x="14" y="6" width="6" height="60" rx="3"/>
+    <rect x="28" y="12" width="6" height="48" rx="3"/>
+    <rect x="42" y="0" width="6" height="72" rx="3"/>
+    <rect x="56" y="12" width="6" height="48" rx="3"/>
+    <rect x="70" y="6" width="6" height="60" rx="3"/>
+    <rect x="84" y="18" width="6" height="36" rx="3"/>
+  </g>
+
+  <!-- Wordmark (raised slightly, increased weight) -->
+  <text class="bn" x="120" y="188" text-anchor="middle">কথা</text>
+</svg>

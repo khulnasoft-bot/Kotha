@@ -1,7 +1,7 @@
 # Kotha
 
 <div align="center">
-  <img src="resources/build/icon.png" width="128" height="128" alt="Kotha Logo" />
+  <img src="resources/build/kotha.svg" width="128" height="128" alt="Kotha Logo" />
   
   <h3>Smart dictation. Everywhere you want.</h3>
   
