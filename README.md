@@ -1,5 +1,25 @@
 # Kotha
 
+<div align="center">
+  <img src="resources/build/icon.png" width="128" height="128" alt="Kotha Logo" />
+  
+  <h3>Smart dictation. Everywhere you want.</h3>
+  
+  <p>
+    <strong>Kotha</strong> is an intelligent voice assistant that brings seamless voice dictation to any application on your computer. Simply hold down your trigger key, speak naturally, and watch your words appear instantly in any text field.
+  </p>
+
+  <p>
+    <img alt="macOS" src="https://img.shields.io/badge/macOS-supported-blue?logo=apple&logoColor=white">
+    <img alt="Version" src="https://img.shields.io/badge/version-0.2.0-green">
+    <img alt="License" src="https://img.shields.io/badge/license-GPL-blue">
+  </p>
+</div>
+
+---
+
+## ✨ Features
+
 ### 🎙️ **Universal Voice Dictation**
 
 - **Works in any app**: Emails, documents, chat applications, web browsers, code editors
@@ -34,18 +54,17 @@
 
 ### Prerequisites
 
-- **macOS 10.15+** or **Windows 10+**
+- **macOS 10.15+**
 - **Node.js 20+** and **Bun** (for development)
 - **Rust toolchain** (for building native components)
 - **Microphone access** and **Accessibility permissions**
 
 ### Installation
 
-1. **Download the latest release** from [khulnasoft.com](https://www.khulnasoft.com/) or the [GitHub releases page](https://github.com/demox-labs/kotha/releases)
+1. **Download the latest release** from [KothaGPT.ai](https://www.KothaGPT.ai/) or the [GitHub releases page](https://github.com/kothagpt/kotha/releases)
 
 2. **Install the application**:
    - **macOS**: Open the `.dmg` file and drag Kotha to Applications
-   - **Windows**: Run the `.exe` installer and follow the setup wizard
 
 3. **Grant permissions** when prompted:
    - **Microphone access**: Required for voice input
@@ -73,7 +92,7 @@
 ```bash
 # Clone the repository
 git clone https://github.com/kothagpt/kotha.git
-cd kotha
+cdkotha
 
 # Install dependencies
 bun install
@@ -99,85 +118,8 @@ bun run dev
 
 ### Build Requirements
 
-#### All Platforms
-
 - **Rust**: Install via [rustup.rs](https://rustup.rs/)
-  - **Windows users**: See Windows-specific instructions below for GNU toolchain setup
-  - **macOS/Linux users**: Default installation is sufficient
-
-#### macOS
-
-- **Xcode Command Line Tools**: `xcode-select --install`
-
-#### Windows
-
-**Required Setup:**
-
-This setup uses git bash for shell operations. Download from [git](https://git-scm.com/downloads)
-
-1. **Install Docker Desktop**: Download from [docker.com](https://www.docker.com/products/docker-desktop/) and ensure it's running
-
-2. **Install Rust** (with GNU target)
-
-Download and run the official [Rust installer for Windows](https://rustup.rs/).  
-This installs `rustup` and the MSVC toolchain by default.
-
-Add the GNU target (needed for our native components):
-
-    rustup toolchain install stable-x86_64-pc-windows-gnu
-    rustup target add x86_64-pc-windows-gnu
-
----
-
-3. **Install 7-Zip**
-
-   winget install 7zip.7zip
-
----
-
-4. **Install GCC & MinGW-w64 via MSYS2**
-
-Install [MSYS2](https://www.msys2.org/).
-
-Open the **MSYS2 MinGW x64** shell (from the Start Menu).
-
-Update and install the toolchain:
-
-    pacman -Syu       # run twice if asked to restart
-    pacman -S --needed mingw-w64-x86_64-toolchain
-
-Verify the tools exist:
-
-    ls /mingw64/bin/gcc.exe /mingw64/bin/dlltool.exe
-
----
-
-5. **Use the MinGW tools when building** (Git Bash)
-
-You normally develop and build in **Git Bash**. Before building, prepend the MinGW path:
-
-    export PATH="/c/msys64/mingw64/bin:$PATH"
-    export DLLTOOL="/c/msys64/mingw64/bin/dlltool.exe"
-    export CC_x86_64_pc_windows_gnu="/c/msys64/mingw64/bin/x86_64-w64-mingw32-gcc.exe"
-    export AR_x86_64_pc_windows_gnu="/c/msys64/mingw64/bin/ar.exe"
-    export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="/c/msys64/mingw64/bin/x86_64-w64-mingw32-gcc.exe"
-
-Check you’re picking up the right ones:
-
-    which gcc       # -> /c/msys64/mingw64/bin/gcc.exe
-    which dlltool   # -> /c/msys64/mingw64/bin/dlltool.exe
-
-⚠️ **Do not add `C:\msys64\ucrt64\bin` to PATH.** That’s the wrong runtime and will break linking.
-
-💡 To avoid running these exports every session, add the lines above to your Git Bash `~/.bashrc` file. They will be applied automatically whenever you open a new Git Bash window.
-
----
-
-6.  **Restart Git Bash if you update MSYS2**
-
-Whenever you update MSYS2 packages with `pacman -Syu`, restart Git Bash so the changes take effect.
-
-> **Note**: Windows builds use Docker for cross-compilation to ensure consistent builds. The Docker container handles the Windows build environment automatically.
+- **macOS**: Xcode Command Line Tools
 
 ### Project Structure
 
@@ -195,7 +137,7 @@ kotha/
 │   ├── audio-recorder/    # Audio capture (Rust)
 │   ├── global-key-listener/ # Keyboard events (Rust)
 │   ├── text-writer/       # Text insertion (Rust)
-│   └── active-application/ # Get the active application for context (Rust)
+│   └── macos-text/        # macOS text reading (Swift)
 ├── server/                # gRPC transcription server
 │   ├── src/               # Server implementation
 │   └── infra/             # AWS infrastructure (CDK)
@@ -209,16 +151,9 @@ kotha/
 bun run dev                 # Start with hot reload
 bun run dev:rust           # Build Rust components and start dev
 
-# Building Native Components
-bun run build:rust         # Build for current platform
-bun run build:rust:mac     # Build for macOS (with universal binary)
-bun run build:rust:win     # Build for Windows
-
-# Building Application
+# Building
 bun run build:mac          # Build for macOS
-bun run build:win          # Build for Windows
-./build-app.sh mac          # Build macOS using build script
-./build-app.sh windows      # Build Windows using build script (requires Docker)
+bun run build:unpack       # Build unpacked for testing
 
 # Code Quality
 bun run lint               # Run ESLint
@@ -397,4 +332,4 @@ This project is licensed under the **GNU General Public License** - see the [LIC
 
 - **Community**: [GitHub Discussions](https://github.com/kothagpt/kotha/discussions)
 - **Issues**: [GitHub Issues](https://github.com/kothagpt/kotha/issues)
-- **Website**: [khulnasoft.com](https://www.khulnasoft.com)
+- **Website**: [KothaGPT.ai](https://www.KothaGPT.ai)

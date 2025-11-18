@@ -50,7 +50,7 @@ export function createAppWindow(): BrowserWindow {
           ...details.responseHeaders,
           'Content-Security-Policy': [
             "default-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
-              "connect-src 'self' https://*.posthog.com https://app.posthog.com https://eu.posthog.com https://us.i.posthog.com; " +
+              "connect-src 'self' https://api2.amplitude.com https://api.amplitude.com https://*.amplitude.com; " +
               "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
               "style-src 'self' 'unsafe-inline'; " +
               "img-src 'self' data: res:; " +
@@ -64,10 +64,6 @@ export function createAppWindow(): BrowserWindow {
   // Clean up the reference when the window is closed.
   mainWindow.on('closed', () => {
     mainWindow = null
-    // On Windows, closing the main window should quit the entire app
-    if (process.platform === 'win32') {
-      app.quit()
-    }
   })
 
   // HMR for renderer base on electron-vite cli.
@@ -143,12 +139,7 @@ export function startPillPositioner() {
     updatePillPosition()
   })
 
-  // Initial position on start
-  updatePillPosition()
-
-  // Throttle updates (Windows needs less frequent updates to avoid jitter)
-  const intervalMs = process.platform === 'win32' ? 750 : 250
-  setInterval(updatePillPosition, intervalMs)
+  setInterval(updatePillPosition, 100) // Update position 10 times per second.
 }
 
 function updatePillPosition() {
@@ -164,25 +155,16 @@ function updatePillPosition() {
     const { x, y, width, height } = display.workArea
     const screenBounds = display.bounds
 
-    const scale = display.scaleFactor || 1
-    const roundToDeviceDip = (v: number) =>
-      Math.round(Math.round(v * scale) / scale)
+    // Calculate position: Horizontally centered, positioned above dock
+    const newX = Math.round(x + width / 2 - pillWidth / 2)
 
-    // Calculate position: Horizontally centered, positioned above taskbar
-    const newX = roundToDeviceDip(x + width / 2 - pillWidth / 2)
-
-    // Position just above the work area bottom
-    const newY = roundToDeviceDip(y + height - pillHeight - 10)
+    // Position just above the work area bottom (which excludes dock)
+    // Add small margin to avoid touching the dock
+    const newY = Math.round(y + height - pillHeight - 10)
 
     // Ensure we don't go below the screen bounds
     const maxY = screenBounds.y + screenBounds.height - pillHeight - 10
     const finalY = Math.min(newY, maxY)
-
-    // Only move if position actually changed (>= 1 DIP)
-    const [currX, currY] = pillWindow.getPosition()
-    if (Math.abs(currX - newX) < 1 && Math.abs(currY - finalY) < 1) {
-      return
-    }
 
     // Set the position of the pill window.
     pillWindow.setPosition(newX, finalY, false) // `false` = not animated

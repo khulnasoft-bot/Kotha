@@ -20,7 +20,7 @@ export const handler = async () => {
       containerOverrides: [
         {
           name: process.env.CONTAINER_NAME!,
-          command: ['sh', './scripts/migrate.sh', 'up'],
+          command: ['bun', 'run', 'db:migrate'],
         },
       ],
     },
@@ -68,5 +68,5 @@ export const handler = async () => {
     await new Promise(resolve => setTimeout(resolve, 5000)) // wait 5 sec before next check
   }
 
-  return { success: true, message: 'Migration completed successfully' }
+  process.exit(0)
 }

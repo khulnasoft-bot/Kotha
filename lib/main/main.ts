@@ -1,5 +1,5 @@
-import './sentry'
-import { app, protocol } from 'electron'
+import { app, protocol, systemPreferences } from 'electron'
+import { autoUpdater } from 'electron-updater'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import {
   createAppWindow,
@@ -12,24 +12,19 @@ import { initializeLogging } from './logger'
 import { registerIPC } from '../window/ipcEvents'
 import { registerDevIPC } from '../window/ipcDev'
 import { initializeDatabase } from './sqlite/db'
-import { setupProtocolHandling, processStartupProtocolUrl } from '../protocol'
-import { startKeyListener } from '../media/keyboard'
+import { setupProtocolHandling } from '../protocol'
+import { startKeyListener, stopKeyListener } from '../media/keyboard'
 // Import the grpcClient singleton
 import { grpcClient } from '../clients/grpcClient'
-import { preventAppNap } from './appNap'
+import { allowAppNap, preventAppNap } from './appNap'
 import { syncService } from './syncService'
-import { checkAccessibilityPermission } from '../utils/crossPlatform'
 import mainStore from './store'
 import { STORE_KEYS } from '../constants/store-keys'
-import { selectedTextReaderService } from '../media/selected-text-reader'
+import { audioRecorderService } from '../media/audio'
 import { voiceInputService } from './voiceInputService'
 import { initializeMicrophoneSelection } from '../media/microphoneSetUp'
 import { validateStoredTokens, ensureValidTokens } from '../auth/events'
 import { Auth0Config, validateAuth0Config } from '../auth/config'
-import { createAppTray } from './tray'
-import { transcriptionService } from './transcriptionService'
-import { initializeAutoUpdater } from './autoUpdaterWrapper'
-import { teardown } from './teardown'
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -100,16 +95,13 @@ app.whenReady().then(async () => {
   createPillWindow()
   startPillPositioner()
 
-  // Handle protocol URL if the app was started by a deep link (Windows first instance)
-  processStartupProtocolUrl()
-
   // --- ADDED: Give the gRPC client a reference to the main window ---
   // This allows it to send transcription results back to the renderer.
   if (mainWindow) {
     grpcClient.setMainWindow(mainWindow)
   }
 
-  if (checkAccessibilityPermission(false)) {
+  if (systemPreferences.isTrustedAccessibilityClient(false)) {
     console.log('Accessibility permissions found, starting key listener.')
     startKeyListener()
   }
@@ -117,39 +109,60 @@ app.whenReady().then(async () => {
   console.log('Microphone access granted, starting audio recorder.')
   voiceInputService.setUpAudioRecorderListeners()
 
-  // Set main window for transcription service so it can send messages
-  transcriptionService.setMainWindow(mainWindow)
-
-  console.log('Starting selected text reader service.')
-  selectedTextReaderService.initialize()
-
   // Initialize microphone selection to prefer built-in microphone
   await initializeMicrophoneSelection()
-
-  // Create system tray after audio recorder is initialized and devices are available
-  await createAppTray()
 
   app.on('activate', function () {
     if (mainWindow === null) {
       createAppWindow()
-      // Update the gRPC client with the new main window reference
-      if (mainWindow) {
-        grpcClient.setMainWindow(mainWindow)
-      }
     }
   })
 
   app.on('before-quit', () => {
     console.log('App is quitting, cleaning up resources...')
-    teardown()
+    stopKeyListener()
+    audioRecorderService.terminate()
+    allowAppNap()
   })
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  // Initialize auto-updater
-  initializeAutoUpdater()
+  if (app.isPackaged) {
+    try {
+      console.log('App is packaged, initializing auto updater...')
+
+      const bucket = import.meta.env.VITE_UPDATER_BUCKET
+      if (!bucket) {
+        throw new Error('VITE_UPDATER_BUCKET environment variable is not set')
+      }
+
+      autoUpdater.setFeedURL({
+        provider: 's3',
+        bucket,
+        path: 'releases/',
+        region: 'us-west-2',
+      })
+
+      autoUpdater.on('update-available', () => {
+        mainWindow?.webContents.send('update-available')
+      })
+
+      autoUpdater.on('update-downloaded', () => {
+        mainWindow?.webContents.send('update-downloaded')
+      })
+
+      autoUpdater.on('download-progress', progressObj => {
+        const log_message = `Download speed: ${progressObj.bytesPerSecond} - Downloaded ${progressObj.percent.toFixed(2)}% (${progressObj.transferred}/${progressObj.total})`
+        console.log(log_message)
+      })
+
+      autoUpdater.checkForUpdates()
+    } catch (e) {
+      console.error('Failed to check for auto updates:', e)
+    }
+  }
 
   // Set up periodic token refresh check (every 10 minutes)
   setInterval(

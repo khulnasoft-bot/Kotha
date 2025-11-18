@@ -1,23 +1,3 @@
-// Define the native binaries that are shared across platforms
-// Only include binaries that actually exist under native/
-const nativeBinaries = [
-  'global-key-listener',
-  'audio-recorder',
-  'active-application',
-]
-
-const getMacResources = () =>
-  nativeBinaries.map(binary => ({
-    from: `native/${binary}/target/\${arch}-apple-darwin/release/${binary}`,
-    to: `binaries/${binary}`,
-  }))
-
-const getWindowsResources = () =>
-  nativeBinaries.map(binary => ({
-    from: `native/${binary}/target/x86_64-pc-windows-gnu/release/${binary}.exe`,
-    to: `binaries/${binary}.exe`,
-  }))
-
 module.exports = {
   appId: 'ai.kotha.kotha',
   productName: 'Kotha',
@@ -34,6 +14,7 @@ module.exports = {
     '!.eslintrc.cjs',
     '!.prettierignore',
     '!.prettierrc.yaml',
+    '!dev-app-update.yml',
     '!README.md',
     '!.env',
     '!.env.*',
@@ -43,7 +24,6 @@ module.exports = {
     '!tsconfig.node.json',
     '!tsconfig.web.json',
     '!native/**',
-    '!build-*.sh',
     {
       from: 'out',
       filter: ['**/*'],
@@ -51,6 +31,24 @@ module.exports = {
   ],
   asar: true,
   asarUnpack: ['resources/**'],
+  extraResources: [
+    {
+      from: 'native/global-key-listener/target/${arch}-apple-darwin/release/global-key-listener',
+      to: 'binaries/global-key-listener',
+    },
+    {
+      from: 'native/audio-recorder/target/${arch}-apple-darwin/release/audio-recorder',
+      to: 'binaries/audio-recorder',
+    },
+    {
+      from: 'native/text-writer/target/${arch}-apple-darwin/release/text-writer',
+      to: 'binaries/text-writer',
+    },
+    {
+      from: 'native/active-application/target/${arch}-apple-darwin/release/text-writer',
+      to: 'binaries/active-application',
+    },
+  ],
   extraMetadata: {
     version: process.env.VITE_KOTHA_VERSION || '0.0.0-dev',
   },
@@ -72,50 +70,23 @@ module.exports = {
       NSMicrophoneUsageDescription:
         'Kotha requires microphone access to transcribe your speech.',
     },
-    extraResources: [
-      ...getMacResources(),
-      { from: 'resources/build/kotha-logo.png', to: 'build/kotha-logo.png' },
-    ],
   },
   dmg: {
     artifactName: 'Kotha-Installer.${ext}',
   },
   win: {
-    target: [
-      {
-        target: 'zip',
-        arch: ['x64'],
-      },
-      {
-        target: 'nsis',
-        arch: ['x64'],
-      },
-    ],
-    artifactName: '${productName}-${version}.${ext}',
+    target: ['nsis'],
     icon: 'resources/build/icon.ico',
     executableName: 'Kotha',
-    requestedExecutionLevel: 'asInvoker',
-    extraResources: [
-      ...getWindowsResources(),
-      { from: 'resources/build/kotha-logo.png', to: 'build/kotha-logo.png' },
-    ],
-    forceCodeSigning: false,
-    asarUnpack: [
-      'resources/**',
-      '**/node_modules/@sentry/**',
-      '**/node_modules/sqlite3/**',
-    ],
   },
-  nodeGypRebuild: false,
-  buildDependenciesFromSource: false,
   nsis: {
+    artifactName: '${name}-${version}-setup.${ext}',
     shortcutName: '${productName}',
-    uninstallDisplayName: '${productName}-uninstaller',
-    createDesktopShortcut: false,
-    createStartMenuShortcut: true,
+    uninstallDisplayName: '${productName}',
+    createDesktopShortcut: 'always',
     oneClick: false,
     perMachine: false,
-    allowToChangeInstallationDirectory: false,
+    allowToChangeInstallationDirectory: true,
     deleteAppDataOnUninstall: true,
   },
 }

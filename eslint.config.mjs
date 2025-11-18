@@ -4,40 +4,23 @@ import reactPlugin from 'eslint-plugin-react'
 import reactHooksPlugin from 'eslint-plugin-react-hooks'
 
 export default [
-  // Global ignores must be in their own config object
   {
     ignores: [
-      '**/node_modules',
-      '**/node_modules/**',
-      '.pnpm-store',
-      'dist',
-      'build',
-      'out',
-      '.vite',
-      'server/infra/cdk.out',
-      'resources/binaries',
-      '**/*.min.js',
-      '**/*.bundle.js',
-      '**/dist',
-      '**/generated',
-      '**/*.pb.ts',
-      '**/*_pb.ts',
-      '**/*_connect.ts',
-      'server/src/kotha_*',
-      'server/src/migrations',
-      'scripts',
-      'native',
-      '**/target',
-      '*.config.js',
+      'node_modules/**',
+      'dist/**',
+      'build/**',
+      'out/**',
+      '.vscode/**',
+      '.git/**',
+      '.gitignore',
+      '.eslintignore',
+      '.eslintrc',
+      '.prettierrc',
       'commitlint.config.js',
       'electron-builder.config.js',
       'tailwind.config.js',
-      'shared-constants.js',
       'server/infra/jest.config.js',
-      // CDK outputs
-      'server/infra/cdk.out/**',
-      'server/infra/**/*.d.ts',
-      'server/infra/**/*.js',
+      '**/generated/**',
     ],
   },
   eslint.configs.recommended,
@@ -126,14 +109,6 @@ export default [
         console: 'readonly',
         window: 'readonly',
       },
-    },
-  },
-  // Test file specific configuration
-  {
-    files: ['**/*.test.ts', '**/*.test.tsx', '**/*.spec.ts', '**/*.spec.tsx'],
-    rules: {
-      '@typescript-eslint/no-require-imports': 'off',
-      'no-console': 'off',
     },
   },
 ]

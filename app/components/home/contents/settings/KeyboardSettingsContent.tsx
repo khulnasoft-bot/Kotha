@@ -1,11 +1,8 @@
 import { useSettingsStore } from '@/app/store/useSettingsStore'
-import { KothaMode } from '@/app/generated/kotha_pb'
-import MultiShortcutEditor from '@/app/components/ui/multi-shortcut-editor'
+import KeyboardShortcutEditor from '@/app/components/ui/keyboard-shortcut-editor'
 
 export default function KeyboardSettingsContent() {
-  const { getKothaModeShortcuts } = useSettingsStore()
-  const transcribeShortcuts = getKothaModeShortcuts(KothaMode.TRANSCRIBE)
-  const editShortcuts = getKothaModeShortcuts(KothaMode.EDIT)
+  const { keyboardShortcut, setKeyboardShortcut } = useSettingsStore()
 
   return (
     <div className="space-y-8">
@@ -19,25 +16,11 @@ export default function KeyboardSettingsContent() {
                 want to use for your shortcut.
               </div>
             </div>
-            <MultiShortcutEditor
-              shortcuts={transcribeShortcuts}
-              mode={KothaMode.TRANSCRIBE}
-            />
-          </div>
-          <div className="flex gap-4 justify-between">
-            <div className="w-1/3">
-              <div className="text-sm font-medium mb-2">
-                Intelligent Mode Shortcut
-              </div>
-              <div className="text-xs text-gray-600 mb-4">
-                Set the shortcut to activate Intelligent Mode. Press your
-                hotkey, speak to Kotha, and the LLM's output is pasted into your
-                text box.
-              </div>
-            </div>
-            <MultiShortcutEditor
-              shortcuts={editShortcuts}
-              mode={KothaMode.EDIT}
+            <KeyboardShortcutEditor
+              shortcut={keyboardShortcut}
+              onShortcutChange={setKeyboardShortcut}
+              hideTitle={true}
+              className="w-1/2"
             />
           </div>
         </div>

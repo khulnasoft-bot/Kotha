@@ -9,8 +9,6 @@ import { loggingInterceptor } from './services/loggingInterceptor.js'
 import { createValidationInterceptor } from './services/validationInterceptor.js'
 import { renderCallbackPage } from './utils/renderCallback.js'
 import dotenv from 'dotenv'
-import { registerLoggingRoutes } from './services/logging.js'
-import { registerAuth0Routes } from './services/auth0.js'
 
 dotenv.config()
 
@@ -22,7 +20,6 @@ export const startServer = async () => {
 
   // Register the Auth0 plugin
   const REQUIRE_AUTH = process.env.REQUIRE_AUTH === 'true'
-  const CLIENT_LOG_GROUP_NAME = process.env.CLIENT_LOG_GROUP_NAME
 
   if (REQUIRE_AUTH) {
     const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN
@@ -67,9 +64,6 @@ export const startServer = async () => {
     })
   }
 
-  // Register Auth0 management proxy routes at the root level (no auth required)
-  await registerAuth0Routes(connectRpcServer)
-
   // Register Connect RPC plugin in a context that conditionally applies Auth0 authentication
   await connectRpcServer.register(async function (fastify) {
     // Apply Auth0 authentication to all routes in this context only if REQUIRE_AUTH is true
@@ -82,7 +76,7 @@ export const startServer = async () => {
 
     // Register the Connect RPC plugin with our service routes and interceptors
     await fastify.register(fastifyConnectPlugin, {
-      routes: kothaServiceRoutes,
+      routes:kothaServiceRoutes,
       // Order matters: logging -> validation -> error handling
       interceptors: [
         loggingInterceptor,
@@ -96,11 +90,6 @@ export const startServer = async () => {
         }
         return createContextValues()
       },
-    })
-
-    await registerLoggingRoutes(fastify, {
-      requireAuth: REQUIRE_AUTH,
-      clientLogGroupName: CLIENT_LOG_GROUP_NAME,
     })
   })
 

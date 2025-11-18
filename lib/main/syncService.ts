@@ -9,24 +9,8 @@ import { Note, Interaction, DictionaryItem } from './sqlite/models'
 import mainStore from './store'
 import { STORE_KEYS } from '../constants/store-keys'
 import type { AdvancedSettings } from './store'
-import { DEFAULT_ADVANCED_SETTINGS } from '../constants/generated-defaults.js'
 
 const LAST_SYNCED_AT_KEY = 'lastSyncedAt'
-
-function getEnvNamespace(): string {
-  const baseUrl = (import.meta.env?.VITE_GRPC_BASE_URL as string) || ''
-  try {
-    const url = new URL(baseUrl)
-    return url.host || baseUrl || 'unknown'
-  } catch {
-    return baseUrl || 'unknown'
-  }
-}
-
-function getLastSyncedAtKey(userId: string): string {
-  const envNs = getEnvNamespace()
-  return `${LAST_SYNCED_AT_KEY}:${envNs}:${userId}`
-}
 
 export class SyncService {
   private isSyncing = false
@@ -80,35 +64,31 @@ export class SyncService {
         return
       }
 
-      const lastSyncedAtKey = getLastSyncedAtKey(user.id)
-      const lastSyncedAt = await KeyValueStore.get(lastSyncedAtKey)
+      const lastSyncedAt = await KeyValueStore.get(LAST_SYNCED_AT_KEY)
 
       // =================================================================
       // PUSH LOCAL CHANGES
       // =================================================================
-      let processedChanges = 0
       if (lastSyncedAt) {
-        processedChanges += await this.pushNotes(lastSyncedAt)
-        processedChanges += await this.pushInteractions(lastSyncedAt)
-        processedChanges += await this.pushDictionaryItems(lastSyncedAt)
+        await this.pushNotes(lastSyncedAt)
+        await this.pushInteractions(lastSyncedAt)
+        await this.pushDictionaryItems(lastSyncedAt)
       }
 
       // =================================================================
       // PULL REMOTE CHANGES
       // =================================================================
-      processedChanges += await this.pullNotes(lastSyncedAt)
-      processedChanges += await this.pullInteractions(lastSyncedAt)
-      processedChanges += await this.pullDictionaryItems(lastSyncedAt)
+      await this.pullNotes(lastSyncedAt)
+      await this.pullInteractions(lastSyncedAt)
+      await this.pullDictionaryItems(lastSyncedAt)
 
       // =================================================================
       // SYNC ADVANCED SETTINGS
       // =================================================================
       await this.syncAdvancedSettings(lastSyncedAt)
 
-      if (processedChanges > 0) {
-        const newSyncTimestamp = new Date().toISOString()
-        await KeyValueStore.set(lastSyncedAtKey, newSyncTimestamp)
-      }
+      const newSyncTimestamp = new Date().toISOString()
+      await KeyValueStore.set(LAST_SYNCED_AT_KEY, newSyncTimestamp)
     } catch (error) {
       console.error('Sync cycle failed:', error)
     } finally {
@@ -116,7 +96,7 @@ export class SyncService {
     }
   }
 
-  private async pushNotes(lastSyncedAt: string): Promise<number> {
+  private async pushNotes(lastSyncedAt: string) {
     const modifiedNotes = await NotesTable.findModifiedSince(lastSyncedAt)
     if (modifiedNotes.length > 0) {
       for (const note of modifiedNotes) {
@@ -134,10 +114,9 @@ export class SyncService {
         }
       }
     }
-    return modifiedNotes.length
   }
 
-  private async pushInteractions(lastSyncedAt: string): Promise<number> {
+  private async pushInteractions(lastSyncedAt: string) {
     const modifiedInteractions =
       await InteractionsTable.findModifiedSince(lastSyncedAt)
     if (modifiedInteractions.length > 0) {
@@ -155,10 +134,9 @@ export class SyncService {
         }
       }
     }
-    return modifiedInteractions.length
   }
 
-  private async pushDictionaryItems(lastSyncedAt: string): Promise<number> {
+  private async pushDictionaryItems(lastSyncedAt: string) {
     const modifiedItems = await DictionaryTable.findModifiedSince(lastSyncedAt)
     if (modifiedItems.length > 0) {
       for (const item of modifiedItems) {
@@ -175,10 +153,9 @@ export class SyncService {
         }
       }
     }
-    return modifiedItems.length
   }
 
-  private async pullNotes(lastSyncedAt?: string): Promise<number> {
+  private async pullNotes(lastSyncedAt?: string) {
     const remoteNotes = await grpcClient.listNotesSince(lastSyncedAt)
     if (remoteNotes.length > 0) {
       for (const remoteNote of remoteNotes) {
@@ -198,10 +175,9 @@ export class SyncService {
         await NotesTable.upsert(localNote)
       }
     }
-    return remoteNotes.length
   }
 
-  private async pullInteractions(lastSyncedAt?: string): Promise<number> {
+  private async pullInteractions(lastSyncedAt?: string) {
     const remoteInteractions =
       await grpcClient.listInteractionsSince(lastSyncedAt)
     if (remoteInteractions.length > 0) {
@@ -239,16 +215,13 @@ export class SyncService {
           created_at: remoteInteraction.createdAt,
           updated_at: remoteInteraction.updatedAt,
           deleted_at: remoteInteraction.deletedAt || null,
-          raw_audio_id: remoteInteraction.rawAudioId,
-          sample_rate: null,
         }
         await InteractionsTable.upsert(localInteraction)
       }
     }
-    return remoteInteractions.length
   }
 
-  private async pullDictionaryItems(lastSyncedAt?: string): Promise<number> {
+  private async pullDictionaryItems(lastSyncedAt?: string) {
     const remoteItems = await grpcClient.listDictionaryItemsSince(lastSyncedAt)
     if (remoteItems.length > 0) {
       for (const remoteItem of remoteItems) {
@@ -268,17 +241,12 @@ export class SyncService {
         await DictionaryTable.upsert(localItem)
       }
     }
-    return remoteItems.length
   }
 
   private async syncAdvancedSettings(lastSyncedAt?: string) {
     try {
       // Get remote advanced settings
       const remoteSettings = await grpcClient.getAdvancedSettings()
-      if (!remoteSettings) {
-        console.warn('No remote advanced settings found, skipping sync.')
-        return
-      }
 
       // Compare timestamps to determine sync direction
       const remoteUpdatedAt = new Date(remoteSettings.updatedAt)
@@ -286,47 +254,10 @@ export class SyncService {
 
       // If remote settings were updated after last sync, pull them to local
       if (remoteUpdatedAt > lastSyncTime) {
-        // Get current local settings to preserve local-only fields
-        const currentLocalSettings = mainStore.get(
-          STORE_KEYS.ADVANCED_SETTINGS,
-        ) as AdvancedSettings
-
         const updatedLocalSettings: AdvancedSettings = {
           llm: {
-            asrProvider:
-              remoteSettings.llm?.asrProvider ||
-              DEFAULT_ADVANCED_SETTINGS.asrProvider,
-            asrModel:
-              remoteSettings.llm?.asrModel ||
-              DEFAULT_ADVANCED_SETTINGS.asrModel,
-            asrPrompt:
-              remoteSettings.llm?.asrPrompt ||
-              DEFAULT_ADVANCED_SETTINGS.asrPrompt,
-            llmProvider:
-              remoteSettings.llm?.llmProvider ||
-              DEFAULT_ADVANCED_SETTINGS.llmProvider,
-            llmModel:
-              remoteSettings.llm?.llmModel ||
-              DEFAULT_ADVANCED_SETTINGS.llmModel,
-            llmTemperature:
-              remoteSettings.llm?.llmTemperature ||
-              DEFAULT_ADVANCED_SETTINGS.llmTemperature,
-            transcriptionPrompt:
-              remoteSettings.llm?.transcriptionPrompt ||
-              DEFAULT_ADVANCED_SETTINGS.transcriptionPrompt,
-            editingPrompt:
-              remoteSettings.llm?.editingPrompt ||
-              DEFAULT_ADVANCED_SETTINGS.editingPrompt,
-            noSpeechThreshold:
-              remoteSettings.llm?.noSpeechThreshold ||
-              DEFAULT_ADVANCED_SETTINGS.noSpeechThreshold,
-            lowQualityThreshold:
-              remoteSettings.llm?.lowQualityThreshold ||
-              DEFAULT_ADVANCED_SETTINGS.lowQualityThreshold,
+            asrModel: remoteSettings.llm?.asrModel || 'whisper-large-v3',
           },
-          // Preserve local-only settings that aren't synced to the server
-          grammarServiceEnabled:
-            currentLocalSettings?.grammarServiceEnabled ?? false,
         }
 
         // Update local store

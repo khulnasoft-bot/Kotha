@@ -1,7 +1,4 @@
 import { IpcRendererEvent, ipcRenderer } from 'electron'
-import { AdvancedSettings } from '../main/store'
-import { DbResult } from '../main/sqlite/repo'
-import { DictionaryItem } from '../main/sqlite/models'
 
 const api = {
   /**
@@ -38,7 +35,6 @@ const api = {
   // Key listener methods
   startKeyListener: () => ipcRenderer.invoke('start-key-listener-service'),
   stopKeyListener: () => ipcRenderer.invoke('stop-key-listener'),
-  registerHotkeys: () => ipcRenderer.invoke('register-hotkeys'),
   startNativeRecording: () => ipcRenderer.invoke('start-native-recording'),
   stopNativeRecording: () => ipcRenderer.invoke('stop-native-recording'),
   getNativeAudioDevices: () => ipcRenderer.invoke('get-native-audio-devices'),
@@ -107,13 +103,8 @@ const api = {
   },
   dictionary: {
     getAll: () => ipcRenderer.invoke('dictionary:get-all'),
-    add: (item: any): Promise<DbResult<DictionaryItem>> =>
-      ipcRenderer.invoke('dictionary:add', item),
-    update: (
-      id: string,
-      word: string,
-      pronunciation: string | null,
-    ): Promise<DbResult<void>> =>
+    add: (item: any) => ipcRenderer.invoke('dictionary:add', item),
+    update: (id: string, word: string, pronunciation: string | null) =>
       ipcRenderer.invoke('dictionary:update', { id, word, pronunciation }),
     delete: (id: string) => ipcRenderer.invoke('dictionary:delete', id),
   },
@@ -141,17 +132,6 @@ const api = {
   notifyOnboardingUpdate: (onboarding: any) =>
     ipcRenderer.send('onboarding-update', onboarding),
 
-  // Send user auth updates to pill window
-  notifyUserAuthUpdate: (authUser: any) =>
-    ipcRenderer.send('user-auth-update', authUser),
-
-  // Analytics device ID methods
-  'analytics:get-device-id': () =>
-    ipcRenderer.invoke('analytics:get-device-id'),
-
-  // Onboarding state for current user
-  getOnboardingState: () => ipcRenderer.invoke('get-onboarding-state'),
-
   notifyLoginSuccess: (
     profile: any,
     idToken: string | null,
@@ -169,10 +149,6 @@ const api = {
     return ipcRenderer.invoke('delete-user-data')
   },
 
-  updateAdvancedSettings: (advancedSettings: AdvancedSettings) => {
-    return ipcRenderer.invoke('update-advanced-settings', advancedSettings)
-  },
-
   // Check if the local server is healthy and accessible
   checkServerHealth: () => {
     return ipcRenderer.invoke('check-server-health')
@@ -183,18 +159,6 @@ const api = {
     onUpdateDownloaded: callback =>
       ipcRenderer.on('update-downloaded', callback),
     installUpdate: () => ipcRenderer.send('install-update'),
-    getUpdateStatus: () => ipcRenderer.invoke('get-update-status'),
-  },
-
-  // Platform info
-  getPlatform: () => ipcRenderer.invoke('get-platform'),
-
-  // Selected Text Reader
-  selectedText: {
-    get: (options?: any) => ipcRenderer.invoke('get-selected-text', options),
-    getString: (maxLength?: number) =>
-      ipcRenderer.invoke('get-selected-text-string', maxLength),
-    hasSelected: () => ipcRenderer.invoke('has-selected-text'),
   },
 }
 

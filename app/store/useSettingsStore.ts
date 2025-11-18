@@ -5,17 +5,6 @@ import {
   updateAnalyticsFromSettings,
 } from '@/app/components/analytics'
 import { STORE_KEYS } from '../../lib/constants/store-keys'
-import type { KeyboardShortcutConfig } from '@/lib/main/store'
-import { KothaMode } from '../generated/kotha_pb'
-
-import { KOTHA_MODE_SHORTCUT_DEFAULTS } from '@/lib/constants/keyboard-defaults'
-import {
-  normalizeChord,
-  ShortcutResult,
-  validateShortcutForDuplicate,
-  isReservedCombination,
-} from '../utils/keyboard'
-import { KeyName } from '@/lib/types/keyboard'
 
 interface SettingsState {
   shareAnalytics: boolean
@@ -26,8 +15,7 @@ interface SettingsState {
   muteAudioWhenDictating: boolean
   microphoneDeviceId: string
   microphoneName: string
-  language: 'en' | 'bn'
-  keyboardShortcuts: KeyboardShortcutConfig[]
+  keyboardShortcut: string[]
   setShareAnalytics: (share: boolean) => void
   setLaunchAtLogin: (launch: boolean) => void
   setShowKothaBarAlways: (show: boolean) => void
@@ -35,14 +23,7 @@ interface SettingsState {
   setInteractionSounds: (enabled: boolean) => void
   setMuteAudioWhenDictating: (enabled: boolean) => void
   setMicrophoneDeviceId: (deviceId: string, name: string) => void
-  setLanguage: (language: 'en' | 'bn') => void
-  createKeyboardShortcut: (mode: KothaMode) => ShortcutResult
-  removeKeyboardShortcut: (shortcutId: string) => void
-  getKothaModeShortcuts: (mode: KothaMode) => KeyboardShortcutConfig[]
-  updateKeyboardShortcut: (
-    shortcutId: string,
-    keys: KeyName[],
-  ) => Promise<ShortcutResult>
+  setKeyboardShortcut: (shortcut: string[]) => void
 }
 
 type SettingCategory = 'general' | 'audio&mic' | 'keyboard' | 'account'
@@ -60,19 +41,7 @@ const getInitialState = () => {
     muteAudioWhenDictating: storedSettings?.muteAudioWhenDictating ?? false,
     microphoneDeviceId: storedSettings?.microphoneDeviceId ?? 'default',
     microphoneName: storedSettings?.microphoneName ?? 'Default Microphone',
-    language: (storedSettings?.language as 'en' | 'bn') ?? 'bn', // Default to Bangla
-    keyboardShortcuts: storedSettings?.keyboardShortcuts ?? [
-      {
-        keys: KOTHA_MODE_SHORTCUT_DEFAULTS[KothaMode.EDIT],
-        mode: KothaMode.EDIT,
-        id: crypto.randomUUID(),
-      },
-      {
-        keys: KOTHA_MODE_SHORTCUT_DEFAULTS[KothaMode.TRANSCRIBE],
-        mode: KothaMode.TRANSCRIBE,
-        id: crypto.randomUUID(),
-      },
-    ],
+    keyboardShortcut: storedSettings?.keyboardShortcut ?? ['fn'], // This fallback is key
     firstName: storedSettings?.firstName ?? '',
     lastName: storedSettings?.lastName ?? '',
     email: storedSettings?.email ?? '',
@@ -98,11 +67,6 @@ const syncToStore = (state: Partial<SettingsState>) => {
   // Notify pill window of settings changes
   if (window.api?.notifySettingsUpdate) {
     window.api.notifySettingsUpdate(updatedSettings)
-  }
-
-  // Re-register hotkeys when keyboard shortcuts change
-  if ('keyboardShortcuts' in state && window.api?.registerHotkeys) {
-    window.api.registerHotkeys()
   }
 }
 
@@ -190,141 +154,23 @@ export const useSettingsStore = create<SettingsState>(set => {
       set(partialState)
       syncToStore(partialState)
     },
-    setLanguage: (language: 'en' | 'bn') => {
-      const currentLanguage = useSettingsStore.getState().language
-      analytics.trackSettings(ANALYTICS_EVENTS.SETTING_CHANGED, {
-        setting_name: 'language',
-        old_value: currentLanguage,
-        new_value: language,
-        setting_category: 'general',
-      })
-      const partialState = { language }
-      set(partialState)
-      syncToStore(partialState)
-
-      // Update i18next language
-      if (typeof window !== 'undefined' && window.i18n) {
-        window.i18n.changeLanguage(language)
-      }
-    },
-    createKeyboardShortcut: (mode: KothaMode): ShortcutResult => {
-      const currentShortcuts = useSettingsStore.getState().keyboardShortcuts
-
-      const newShortcut = {
-        keys: [],
-        mode,
-        id: crypto.randomUUID(),
-      }
-
-      const newShortcuts = [...currentShortcuts, newShortcut]
-      const partialState = {
-        keyboardShortcuts: newShortcuts,
-      }
+    setKeyboardShortcut: (shortcut: string[]) => {
+      const currentShortcut = useSettingsStore.getState().keyboardShortcut
+      const partialState = { keyboardShortcut: [...shortcut].sort() }
       // Track keyboard shortcut change
-      analytics.trackSettings(ANALYTICS_EVENTS.KEYBOARD_SHORTCUTS_CHANGED, {
-        setting_name: 'keyboardShortcuts',
-        old_value: currentShortcuts,
-        new_value: newShortcuts,
+      analytics.trackSettings(ANALYTICS_EVENTS.KEYBOARD_SHORTCUT_CHANGED, {
+        setting_name: 'keyboardShortcut',
+        old_value: currentShortcut,
+        new_value: shortcut,
         setting_category: 'input',
       })
 
       // Update user properties
       analytics.updateUserProperties({
-        keyboard_shortcuts: newShortcuts.map(ks => JSON.stringify(ks)),
+        keyboard_shortcut: shortcut,
       })
       set(partialState)
       syncToStore(partialState)
-      return { success: true }
-    },
-    removeKeyboardShortcut: (shortcutId: string) => {
-      const currentShortcuts = useSettingsStore.getState().keyboardShortcuts
-      const newShortcuts = currentShortcuts.filter(ks => ks.id !== shortcutId)
-      const partialState = {
-        keyboardShortcuts: newShortcuts,
-      }
-      // Track keyboard shortcut change
-      analytics.trackSettings(ANALYTICS_EVENTS.KEYBOARD_SHORTCUTS_CHANGED, {
-        setting_name: 'keyboardShortcuts',
-        old_value: currentShortcuts,
-        new_value: newShortcuts,
-        setting_category: 'input',
-      })
-
-      // Update user properties
-      analytics.updateUserProperties({
-        keyboard_shortcuts: newShortcuts.map(ks => JSON.stringify(ks)),
-      })
-      set(partialState)
-      syncToStore(partialState)
-    },
-    getKothaModeShortcuts: (mode: KothaMode) => {
-      const { keyboardShortcuts } = useSettingsStore.getState()
-      return keyboardShortcuts.filter(ks => ks.mode === mode)
-    },
-    updateKeyboardShortcut: async (
-      shortcutId: string,
-      keys: KeyName[],
-    ): Promise<ShortcutResult> => {
-      const currentShortcuts = useSettingsStore.getState()
-        .keyboardShortcuts as KeyboardShortcutConfig[]
-
-      const shortcut = currentShortcuts.find(ks => ks.id === shortcutId)
-
-      if (!shortcut) {
-        return { success: false, error: 'not-found' }
-      }
-
-      const normalizedKeys = normalizeChord(keys)
-
-      // Get platform for validation
-      const platform = await window.api.getPlatform()
-
-      // Check for reserved combinations
-      const reservedCheck = isReservedCombination(normalizedKeys, platform)
-      if (reservedCheck.isReserved) {
-        return {
-          success: false,
-          error: 'reserved-combination',
-          errorMessage: reservedCheck.reason,
-        }
-      }
-
-      const newShortcut = {
-        ...shortcut,
-        keys: normalizedKeys,
-      }
-
-      const duplicateError = validateShortcutForDuplicate(
-        currentShortcuts,
-        newShortcut,
-        shortcut.mode,
-      )
-      if (duplicateError) {
-        return duplicateError
-      }
-
-      const updatedShortcuts = currentShortcuts.map(ks =>
-        ks.id === shortcutId ? { ...ks, keys: normalizedKeys } : ks,
-      )
-      const partialState = {
-        keyboardShortcuts: updatedShortcuts,
-      }
-      // Track keyboard shortcut change
-      analytics.trackSettings(ANALYTICS_EVENTS.KEYBOARD_SHORTCUTS_CHANGED, {
-        setting_name: 'keyboardShortcuts',
-        old_value: currentShortcuts,
-        new_value: updatedShortcuts,
-        setting_category: 'input',
-      })
-
-      // Update user properties
-      analytics.updateUserProperties({
-        keyboard_shortcuts: updatedShortcuts.map(ks => JSON.stringify(ks)),
-      })
-      set(partialState)
-      syncToStore(partialState)
-
-      return { success: true }
     },
   }
 })

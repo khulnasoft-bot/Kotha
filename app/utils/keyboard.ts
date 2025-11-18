@@ -1,318 +1,131 @@
 import { KeyEvent } from '@/lib/preload'
-import { KeyboardShortcutConfig } from '@/lib/main/store'
-import { KothaMode } from '../generated/kotha_pb'
-import {
+
+// Map of key names to their normalized UI representations
+const keyNameMap: Record<string, string> = {
+  // Modifier keys
+  MetaLeft: 'command',
+  MetaRight: 'command',
+  ControlLeft: 'control',
+  ControlRight: 'control',
+  Alt: 'option',
+  AltGr: 'option',
+  ShiftLeft: 'shift',
+  ShiftRight: 'shift',
+  Function: 'fn',
+  'Unknown(179)': 'fn_fast', // Happens when pressing and releasing fn quickly
+
+  // Letter keys (remove the 'Key' prefix)
+  KeyA: 'a',
+  KeyB: 'b',
+  KeyC: 'c',
+  KeyD: 'd',
+  KeyE: 'e',
+  KeyF: 'f',
+  KeyG: 'g',
+  KeyH: 'h',
+  KeyI: 'i',
+  KeyJ: 'j',
+  KeyK: 'k',
+  KeyL: 'l',
+  KeyM: 'm',
+  KeyN: 'n',
+  KeyO: 'o',
+  KeyP: 'p',
+  KeyQ: 'q',
+  KeyR: 'r',
+  KeyS: 's',
+  KeyT: 't',
+  KeyU: 'u',
+  KeyV: 'v',
+  KeyW: 'w',
+  KeyX: 'x',
+  KeyY: 'y',
+  KeyZ: 'z',
+
+  // Number keys (remove the 'Digit' prefix)
+  Digit1: '1',
+  Digit2: '2',
+  Digit3: '3',
+  Digit4: '4',
+  Digit5: '5',
+  Digit6: '6',
+  Digit7: '7',
+  Digit8: '8',
+  Digit9: '9',
+  Digit0: '0',
+
+  // Special keys
+  Space: 'space',
+  Enter: 'enter',
+  Escape: 'esc',
+  Backspace: 'backspace',
+  Tab: 'tab',
+  CapsLock: 'caps',
+  Delete: 'delete',
+  ArrowUp: '↑',
+  ArrowDown: '↓',
+  ArrowLeft: '←',
+  ArrowRight: '→',
+}
+
+/**
+ * A reverse mapping of normalized key names to their raw `rdev` counterparts.
+ * This is a one-to-many relationship (e.g., 'command' maps to ['MetaLeft', 'MetaRight']).
+ */
+const reverseKeyNameMap: Record<string, string[]> = Object.entries(
   keyNameMap,
-  normalizeLegacyKey,
-  getKeyDisplayInfo,
-  KeyName,
-} from '@/lib/types/keyboard'
-
-/**
- * Helper to format directional indicators for modifier keys
- */
-export function getDirectionalIndicator(
-  side: 'left' | 'right' | undefined,
-  showText: boolean = false,
-): string {
-  if (!side) return ''
-  const arrow = side === 'left' ? '◀' : '▶'
-  if (showText) {
-    return side === 'left' ? `${arrow} left` : `right ${arrow}`
-  }
-  return arrow
-}
-
-/**
- * Get formatted display components for a key
- * @param keyboardKey The key name to display
- * @param platform The platform to render keys for
- * @param options Display options
- * @returns Object with formatted display components
- */
-export function getKeyDisplay(
-  keyboardKey: KeyName,
-  platform: 'darwin' | 'win32' | undefined = 'darwin',
-  options: {
-    showDirectionalText?: boolean
-    format?: 'symbol' | 'label' | 'both'
-  } = {},
-): string {
-  const { showDirectionalText = false, format = 'symbol' } = options
-
-  const displayInfo = getKeyDisplayInfo(keyboardKey, platform)
-  const dirIndicator = getDirectionalIndicator(
-    displayInfo.side,
-    showDirectionalText,
-  )
-
-  const label = displayInfo.label
-
-  let result: string
-  if (displayInfo.isModifier && displayInfo.symbol) {
-    if (format === 'symbol') {
-      result = displayInfo.symbol
-      if (dirIndicator) {
-        result = showDirectionalText
-          ? `${result} ${dirIndicator}`
-          : `${result} ${dirIndicator}`
-      }
-    } else if (format === 'label') {
-      result = label
-      if (dirIndicator) {
-        result = showDirectionalText
-          ? `${result} ${dirIndicator}`
-          : `${result} ${dirIndicator}`
-      }
-    } else {
-      // 'both'
-      result = `${displayInfo.symbol} ${label}`
-      if (dirIndicator) {
-        result = `${result} ${dirIndicator}`
-      }
+).reduce(
+  (acc, [rawKey, normalizedKey]) => {
+    if (!acc[normalizedKey]) {
+      acc[normalizedKey] = []
     }
-  } else {
-    result = label
-  }
-
-  return result
-}
-
-export type ShortcutError =
-  | 'duplicate-key-same-mode'
-  | 'duplicate-key-diff-mode'
-  | 'not-found'
-  | 'reserved-combination'
-
-export type ShortcutResult = {
-  success: boolean
-  error?: ShortcutError
-  errorMessage?: string
-}
-
-const MODIFIER_SEQUENCE = [
-  'control',
-  'control-left',
-  'control-right',
-  'option',
-  'option-left',
-  'option-right',
-  'alt',
-  'shift',
-  'shift-left',
-  'shift-right',
-  'command',
-  'command-left',
-  'command-right',
-  'fn',
-] as const
-
-const MODIFIER_INDEX: Record<string, number> = MODIFIER_SEQUENCE.reduce(
-  (acc, key, i) => {
-    acc[key] = i
+    acc[normalizedKey].push(rawKey)
     return acc
   },
-  {} as Record<string, number>,
+  {} as Record<string, string[]>,
 )
 
-function normalizeKey(raw: KeyName): KeyName {
-  return raw.trim().toLowerCase() as KeyName
-}
-
-function sortKeysCanonical(keys: KeyName[]): KeyName[] {
-  const unique = Array.from(new Set(keys.map(normalizeKey)))
-
-  const modifiers: KeyName[] = []
-  const nonModifiers: KeyName[] = []
-
-  for (const key of unique) {
-    if (key in MODIFIER_INDEX) modifiers.push(key)
-    else nonModifiers.push(key)
+/**
+ * Normalizes a key event into a format suitable for UI display
+ * @param event The key event from the global key listener
+ * @returns The normalized key name for UI display
+ */
+export function normalizeKeyEvent(event: KeyEvent): string {
+  // If we have a mapping for this key, use it
+  if (keyNameMap[event.key]) {
+    return keyNameMap[event.key]
   }
 
-  modifiers.sort((a, b) => MODIFIER_INDEX[a] - MODIFIER_INDEX[b])
-  nonModifiers.sort() // simple alphabetical for everything else
+  // For unknown keys, try to clean up the name
+  const key = event.key
+    .toLowerCase()
+    .replace(/^key/, '') // Remove 'Key' prefix
+    .replace(/^digit/, '') // Remove 'Digit' prefix
+    .replace(/^arrow/, '') // Remove 'Arrow' prefix
+    .replace(/^(left|right)$/, '') // Remove 'Left'/'Right' suffix
 
-  return [...modifiers, ...nonModifiers]
-}
-
-export function normalizeChord(keys: KeyName[]): KeyName[] {
-  return sortKeysCanonical(keys.filter(Boolean))
-}
-
-// Helper to generate all variants of a modifier key (base, left, right)
-function modifierVariants(modifier: string): string[] {
-  return [modifier, `${modifier}-left`, `${modifier}-right`]
-}
-
-// Helper to create reserved combinations for all variants of a modifier
-function createReservedCombos(
-  modifier: string,
-  key: string | null,
-  reason: string,
-) {
-  return modifierVariants(modifier).map(mod => ({
-    keys: key ? [mod as KeyName, key as KeyName] : [mod as KeyName],
-    reason,
-  }))
-}
-
-// Get platform-specific reserved combinations
-function getReservedCombinations(
-  platform: 'darwin' | 'win32' = 'darwin',
-): { keys: KeyName[]; reason?: string }[] {
-  // Common combinations across all platforms
-  const common = [
-    // Browser tab switching (works the same on all platforms)
-    ...createReservedCombos('control', 'tab', 'Browser tab switching'),
-  ]
-
-  if (platform === 'darwin') {
-    // macOS uses Command key for system operations
-    return [
-      ...common,
-      ...createReservedCombos('command', 'c', 'Reserved for copying'),
-      ...createReservedCombos('command', 'v', 'Reserved for pasting'),
-      ...createReservedCombos('command', 'q', 'System quit command'),
-      ...createReservedCombos('command', 'w', 'Close window'),
-      ...createReservedCombos('command', 'tab', 'System app switching'),
-    ]
-  } else {
-    // Windows uses Control for copy/paste, Alt (option) for app switching
-    return [
-      ...common,
-      ...createReservedCombos('control', 'c', 'Reserved for copying'),
-      ...createReservedCombos('control', 'v', 'Reserved for pasting'),
-      ...createReservedCombos('control', 'w', 'Close tab/window'),
-      ...createReservedCombos(
-        'option',
-        'tab',
-        'System app switching (Alt+Tab)',
-      ),
-      // Block the Windows key entirely (no specific key combination needed)
-      ...createReservedCombos(
-        'command',
-        null,
-        'Windows key triggers system menu and should not be used for shortcuts',
-      ),
-    ]
-  }
-}
-
-// Check if a shortcut contains reserved key combinations
-export function isReservedCombination(
-  keys: KeyName[],
-  platform: 'darwin' | 'win32' = 'darwin',
-): {
-  isReserved: boolean
-  reason?: string
-} {
-  // Normalize legacy keys to new format
-  const normalizedKeys = sortKeysCanonical(keys.map(normalizeLegacyKey))
-
-  // Get platform-specific reserved combinations
-  const reservedCombinations = getReservedCombinations(platform)
-
-  // Special check for Windows: block ANY use of command keys
-  if (platform !== 'darwin') {
-    const hasCommandKey = normalizedKeys.some(
-      key => key === 'command-left' || key === 'command-right',
-    )
-    if (hasCommandKey) {
-      return {
-        isReserved: true,
-        reason:
-          'Windows key triggers system menu and should not be used for shortcuts',
-      }
-    }
-  }
-
-  for (const reserved of reservedCombinations) {
-    const normalizedReserved = sortKeysCanonical(reserved.keys)
-
-    // Check for exact match - same number of keys and all keys match
-    const isExactMatch =
-      normalizedKeys.length === normalizedReserved.length &&
-      normalizedReserved.every(reservedKey => {
-        return normalizedKeys.includes(reservedKey)
-      })
-
-    if (isExactMatch) {
-      return { isReserved: true, reason: reserved.reason }
-    }
-  }
-
-  return { isReserved: false }
-}
-
-// Returns the mode of the duplicate shortcut if found, otherwise undefined
-export function isDuplicateShortcut(
-  currentShortcuts: KeyboardShortcutConfig[],
-  shortcutToCheck: KeyboardShortcutConfig,
-): KothaMode | undefined {
-  // Normalize keys for comparison
-  const normalizedCheckKeys = sortKeysCanonical(
-    shortcutToCheck.keys.map(normalizeLegacyKey),
-  )
-
-  const duplicate = currentShortcuts.find(ks => {
-    if (ks.id === shortcutToCheck.id) return false
-
-    const normalizedStoredKeys = sortKeysCanonical(
-      ks.keys.map(normalizeLegacyKey),
-    )
-
-    // Check if all keys match exactly
-    return (
-      JSON.stringify(normalizedCheckKeys) ===
-      JSON.stringify(normalizedStoredKeys)
-    )
-  })
-
-  if (duplicate) {
-    return duplicate.mode
-  }
-
-  return undefined
-}
-
-// Helper to validate duplicate shortcuts and return appropriate error result
-export function validateShortcutForDuplicate(
-  currentShortcuts: KeyboardShortcutConfig[],
-  shortcutToCheck: KeyboardShortcutConfig,
-  expectedMode: KothaMode,
-): ShortcutResult | null {
-  const duplicateMode = isDuplicateShortcut(currentShortcuts, shortcutToCheck)
-
-  if (duplicateMode !== undefined) {
-    const sameMode = duplicateMode === expectedMode
-    return {
-      success: false,
-      error: sameMode ? 'duplicate-key-same-mode' : 'duplicate-key-diff-mode',
-    }
-  }
-
-  return null // No duplicate found, validation passes
+  return key || 'unknown'
 }
 
 /**
  * Tracks the state of currently pressed keys
  */
 export class KeyState {
-  private pressedKeys: Set<KeyName> = new Set()
-  private shortcut: KeyName[] = []
+  private pressedKeys: Set<string> = new Set()
+  private shortcut: string[] = []
 
-  constructor(shortcut: KeyName[] = []) {
+  constructor(shortcut: string[] = []) {
     this.updateShortcut(shortcut)
   }
 
   /**
-   * Updates the shortcut
+   * Updates the shortcut and instructs the native listener to block the relevant keys.
    * @param shortcut The shortcut to set, as an array of normalized key names.
    */
-  updateShortcut(shortcut: KeyName[]) {
-    // Normalize legacy keys to new format
-    this.shortcut = shortcut.map(normalizeLegacyKey)
+  updateShortcut(shortcut: string[]) {
+    this.shortcut = shortcut
+    const keysToBlock = this.getKeysToBlock()
+    window.api.blockKeys(keysToBlock)
   }
 
   /**
@@ -320,8 +133,7 @@ export class KeyState {
    * @param event The key event from the global key listener
    */
   update(event: KeyEvent) {
-    // Use keyNameMap for proper directional key preservation
-    const key = keyNameMap[event.key] || event.key.toLowerCase()
+    const key = normalizeKeyEvent(event)
 
     // Handle Function key special case
     if (key === 'fn_fast') {
@@ -348,7 +160,7 @@ export class KeyState {
    * @param key The normalized key name to check
    * @returns Whether the key is currently pressed
    */
-  isKeyPressed(key: KeyName): boolean {
+  isKeyPressed(key: string): boolean {
     return this.pressedKeys.has(key)
   }
 
@@ -357,5 +169,24 @@ export class KeyState {
    */
   clear() {
     this.pressedKeys.clear()
+  }
+
+  /**
+   * Gets the raw `rdev` key names that should be blocked for the current shortcut.
+   * @returns Array of keys to block
+   */
+  private getKeysToBlock(): string[] {
+    // Use the reverse map to find all raw keys for the normalized shortcut keys.
+    const keys = this.shortcut.flatMap(
+      normalizedKey => reverseKeyNameMap[normalizedKey] || [],
+    )
+
+    // Also block the special "fast fn" key if fn is part of the shortcut.
+    if (this.shortcut.includes('fn')) {
+      keys.push('Unknown(179)')
+    }
+
+    // Return a unique set of keys.
+    return [...new Set(keys)]
   }
 }

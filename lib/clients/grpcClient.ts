@@ -20,24 +20,20 @@ import {
   DeleteUserDataRequestSchema,
   GetAdvancedSettingsRequestSchema,
   UpdateAdvancedSettingsRequestSchema,
-  KothaMode,
 } from '@/app/generated/kotha_pb'
 import { createClient } from '@connectrpc/connect'
 import { createConnectTransport } from '@connectrpc/connect-node'
 import { ConnectError, Code } from '@connectrpc/connect'
 import { BrowserWindow } from 'electron'
 import { create } from '@bufbuild/protobuf'
+import { setFocusedText } from '../media/text-writer'
 import { Note, Interaction, DictionaryItem } from '../main/sqlite/models'
 import { DictionaryTable } from '../main/sqlite/repo'
-import {
-  AdvancedSettings,
-  getAdvancedSettings,
-  getCurrentUserId,
-} from '../main/store'
-import { getSelectedTextString } from '../media/selected-text-reader'
+import { getAdvancedSettings, getCurrentUserId } from '../main/store'
 import { ensureValidTokens } from '../auth/events'
 import { Auth0Config } from '../auth/config'
 import { getActiveWindow } from '../media/active-application'
+import { traceLogger } from '../main/traceLogger'
 
 class GrpcClient {
   private client: ReturnType<typeof createClient<typeof KothaService>>
@@ -57,26 +53,6 @@ class GrpcClient {
     this.mainWindow = window
   }
 
-  // Helper method to safely send messages to the main window
-  private safeSendToMainWindow(channel: string, ...args: any[]) {
-    if (
-      this.mainWindow &&
-      !this.mainWindow.isDestroyed() &&
-      !this.mainWindow.webContents.isDestroyed()
-    ) {
-      try {
-        this.mainWindow.webContents.send(channel, ...args)
-      } catch (error) {
-        console.warn(
-          `Failed to send message to main window on channel ${channel}:`,
-          error,
-        )
-        // Clear the reference to the destroyed window
-        this.mainWindow = null
-      }
-    }
-  }
-
   setAuthToken(token: string | null) {
     this.authToken = token
   }
@@ -90,7 +66,7 @@ class GrpcClient {
     return new Headers({ Authorization: `Bearer ${this.authToken}` })
   }
 
-  private async getHeadersWithMetadata(mode: KothaMode) {
+  private async getHeadersWithMetadata() {
     const headers = this.getHeaders()
 
     try {
@@ -115,76 +91,13 @@ class GrpcClient {
         headers.set('app-name', windowContext.appName)
       }
 
-      function flattenHeaderValue(value: string) {
-        const flattened = value
-          .replace(/[\r\n]+/g, ' ')
-          .replace(/\s{2,}/g, ' ')
-          .trim()
-
-        // Check if the string contains non-ASCII characters
-        // eslint-disable-next-line no-control-regex
-        const hasUnicode = /[^\x00-\x7F]/.test(flattened)
-
-        if (hasUnicode) {
-          // Base64 encode to safely transmit Unicode characters via gRPC headers
-          return `base64:${Buffer.from(flattened, 'utf8').toString('base64')}`
-        }
-
-        return flattened
-      }
-
       // Add ASR model from advanced settings
       const advancedSettings = getAdvancedSettings()
+      console.log(
+        '[gRPC Client] Using ASR model from advanced settings:',
+        advancedSettings,
+      )
       headers.set('asr-model', advancedSettings.llm.asrModel)
-      headers.set('asr-provider', advancedSettings.llm.asrProvider)
-      headers.set(
-        'asr-prompt',
-        flattenHeaderValue(advancedSettings.llm.asrPrompt),
-      )
-      headers.set('llm-provider', advancedSettings.llm.llmProvider)
-      headers.set('llm-model', advancedSettings.llm.llmModel)
-      headers.set(
-        'llm-temperature',
-        advancedSettings.llm.llmTemperature.toString(),
-      )
-      headers.set(
-        'transcription-prompt',
-        flattenHeaderValue(advancedSettings.llm.transcriptionPrompt),
-      )
-      // Note: Editing prompt is currently disabled until a better versioning solution is implemented
-      // https://github.com/kothagpt/kotha/issues/174
-      // headers.set(
-      //   'editing-prompt',
-      //   flattenHeaderValue(advancedSettings.llm.editingPrompt),
-      // )
-      headers.set(
-        'no-speech-threshold',
-        advancedSettings.llm.noSpeechThreshold.toString(),
-      )
-      headers.set(
-        'low-quality-threshold',
-        advancedSettings.llm.lowQualityThreshold.toString(),
-      )
-
-      headers.set('mode', mode.toString())
-
-      try {
-        // We currently only support context gathering on mac
-        if (mode === KothaMode.EDIT) {
-          const contextText = await getSelectedTextString(10000)
-          if (contextText && contextText.trim().length > 0) {
-            headers.set('context-text', flattenHeaderValue(contextText))
-            console.log(
-              '[gRPC Client] Adding context text to headers:',
-              contextText.length,
-              'characters',
-              contextText,
-            )
-          }
-        }
-      } catch (error) {
-        console.error('[gRPC Client] Error getting context text:', error)
-      }
     } catch (error) {
       console.error(
         'Failed to fetch vocabulary/settings for transcription:',
@@ -252,7 +165,9 @@ class GrpcClient {
       console.log('Signing out user due to authentication failure')
 
       // Notify the main window to sign out the user
-      this.safeSendToMainWindow('auth-token-expired')
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        this.mainWindow.webContents.send('auth-token-expired')
+      }
 
       // Clear the auth token
       this.authToken = null
@@ -262,12 +177,65 @@ class GrpcClient {
     return false
   }
 
-  async transcribeStream(stream: AsyncIterable<AudioChunk>, mode: KothaMode) {
+  async transcribeStream(stream: AsyncIterable<AudioChunk>) {
     return this.withRetry(async () => {
+      // Get current interaction ID for trace logging
+      const interactionId = (globalThis as any).currentInteractionId
+      if (interactionId) {
+        traceLogger.logStep(interactionId, 'GRPC_STREAM_START', {
+          hasAuthToken: !!this.authToken,
+        })
+      }
+
       const response = await this.client.transcribeStream(stream, {
-        headers: await this.getHeadersWithMetadata(mode),
+        headers: await this.getHeadersWithMetadata(),
       })
+
+      // Log successful transcription response
+      if (interactionId) {
+        traceLogger.logStep(interactionId, 'GRPC_STREAM_SUCCESS', {
+          transcript: response.transcript,
+          transcriptLength: response.transcript?.length || 0,
+        })
+      }
+
+      // Type the transcribed text into the focused application
+      if (response.transcript && !response.error) {
+        setFocusedText(response.transcript)
+
+        // Log text insertion
+        if (interactionId) {
+          traceLogger.logStep(interactionId, 'TEXT_INSERTION', {
+            transcript: response.transcript,
+            transcriptLength: response.transcript.length,
+          })
+        }
+      }
+
+      if (this.mainWindow) {
+        this.mainWindow.webContents.send('transcription-result', response)
+      }
       return response
+    }).catch(error => {
+      // Log gRPC error
+      const interactionId = (globalThis as any).currentInteractionId
+      if (interactionId) {
+        traceLogger.logError(
+          interactionId,
+          'GRPC_STREAM_ERROR',
+          error.message,
+          {
+            error: error.message,
+            errorCode: error.code,
+          },
+        )
+      }
+
+      // Handle transcription errors separately
+      if (this.mainWindow) {
+        this.mainWindow.webContents.send('transcription-error', error)
+      }
+      throw error
     })
   }
 
@@ -449,17 +417,7 @@ class GrpcClient {
     })
   }
 
-  async getAdvancedSettings(): Promise<AdvancedSettingsPb | null> {
-    // Check if user is self-hosted and skip server sync
-    const userId = getCurrentUserId()
-    const isSelfHosted = userId === 'self-hosted'
-
-    if (isSelfHosted) {
-      console.log('Self-hosted user detected, using local advanced settings')
-      // Return null for self-hosted users since they don't sync with server
-      return null
-    }
-
+  async getAdvancedSettings(): Promise<AdvancedSettingsPb> {
     return this.withRetry(async () => {
       const request = create(GetAdvancedSettingsRequestSchema, {})
       return await this.client.getAdvancedSettings(request, {
@@ -468,34 +426,13 @@ class GrpcClient {
     })
   }
 
-  async updateAdvancedSettings(
-    settings: AdvancedSettings,
-  ): Promise<AdvancedSettingsPb | null> {
-    // Check if user is self-hosted and skip server sync
-    const userId = getCurrentUserId()
-    const isSelfHosted = userId === 'self-hosted'
-
-    if (isSelfHosted) {
-      console.log(
-        'Self-hosted user detected, skipping server sync for advanced settings',
-      )
-      // Return null for self-hosted users since settings are stored locally
-      return null
-    }
-
+  async updateAdvancedSettings(settings: {
+    llm: { asrModel: string }
+  }): Promise<AdvancedSettingsPb> {
     return this.withRetry(async () => {
       const request = create(UpdateAdvancedSettingsRequestSchema, {
         llm: {
           asrModel: settings.llm.asrModel,
-          asrProvider: settings.llm.asrProvider,
-          asrPrompt: settings.llm.asrPrompt,
-          llmProvider: settings.llm.llmProvider,
-          llmModel: settings.llm.llmModel,
-          llmTemperature: settings.llm.llmTemperature,
-          transcriptionPrompt: settings.llm.transcriptionPrompt,
-          editingPrompt: settings.llm.editingPrompt,
-          noSpeechThreshold: settings.llm.noSpeechThreshold,
-          lowQualityThreshold: settings.llm.lowQualityThreshold,
         },
       })
       return await this.client.updateAdvancedSettings(request, {

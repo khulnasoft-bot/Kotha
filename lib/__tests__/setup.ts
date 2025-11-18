@@ -154,24 +154,6 @@ mock.module('electron', () => {
     autoUpdater: {
       quitAndInstall: () => {},
     },
-    powerMonitor: {
-      on: () => {},
-      getSystemIdleState: () => 'active',
-      getSystemIdleTime: () => 0,
-    },
-    crashReporter: {
-      start: () => {},
-      getLastCrashReport: () => null,
-      getUploadedReports: () => [],
-      getUploadToServer: () => true,
-      setUploadToServer: () => {},
-    },
-    nativeImage: {
-      createEmpty: () => ({}),
-      createFromPath: () => ({}),
-      createFromBuffer: () => ({}),
-      createFromDataURL: () => ({}),
-    },
   }
 })
 

@@ -1,12 +1,11 @@
 import { spawn } from 'child_process'
-import store, { KeyboardShortcutConfig } from '../main/store'
+import store from '../main/store' // Import the main process store
 import { STORE_KEYS } from '../constants/store-keys'
 import { getNativeBinaryPath } from './native-interface'
 import { BrowserWindow } from 'electron'
 import { audioRecorderService } from './audio'
 import { voiceInputService } from '../main/voiceInputService'
-import { KeyName, keyNameMap, normalizeLegacyKey } from '../types/keyboard'
-import { interactionManager } from '../main/interactions/InteractionManager'
+import { traceLogger } from '../main/traceLogger'
 
 interface KeyEvent {
   type: 'keydown' | 'keyup'
@@ -15,33 +14,9 @@ interface KeyEvent {
   raw_code: number
 }
 
-interface HeartbeatEvent {
-  type: 'heartbeat_ping'
-  id: string
-  timestamp: string
-}
-
-interface RegisteredHotkeysEvent {
-  type: 'registered_hotkeys'
-  hotkeys: Array<{ keys: string[] }>
-}
-
-type ProcessEvent = KeyEvent | HeartbeatEvent | RegisteredHotkeysEvent
-
 // Global key listener process singleton
 export let KeyListenerProcess: ReturnType<typeof spawn> | null = null
 export let isShortcutActive = false
-
-// Heartbeat monitoring state
-let lastHeartbeatReceived = Date.now()
-let heartbeatCheckTimer: NodeJS.Timeout | null = null
-const HEARTBEAT_CHECK_INTERVAL_MS = 5000 // Check every 5 seconds
-const HEARTBEAT_TIMEOUT_MS = 15000 // 15 seconds without heartbeat triggers restart
-
-// Debouncing state
-let shortcutDebounceTimeout: NodeJS.Timeout | null = null
-let pendingShortcut: KeyboardShortcutConfig | null = null
-export const DEBOUNCE_TIME = 10
 
 // Test utility function - only available in development
 export const resetForTesting = () => {
@@ -49,145 +24,82 @@ export const resetForTesting = () => {
     KeyListenerProcess = null
     isShortcutActive = false
     pressedKeys.clear()
-    keyPressTimestamps.clear()
-    stopStuckKeyChecker()
-    stopHeartbeatChecker()
-    if (shortcutDebounceTimeout) {
-      clearTimeout(shortcutDebounceTimeout)
-      shortcutDebounceTimeout = null
-    }
-    pendingShortcut = null
-    lastHeartbeatReceived = Date.now()
   }
 }
 
 const nativeModuleName = 'global-key-listener'
 
+// Map of raw key names to their normalized representations
+const keyNameMap: Record<string, string> = {
+  MetaLeft: 'command',
+  MetaRight: 'command',
+  ControlLeft: 'control',
+  ControlRight: 'control',
+  Alt: 'option',
+  AltGr: 'option',
+  ShiftLeft: 'shift',
+  ShiftRight: 'shift',
+  Function: 'fn',
+  'Unknown(179)': 'fn_fast',
+  KeyA: 'a',
+  KeyB: 'b',
+  KeyC: 'c',
+  KeyD: 'd',
+  KeyE: 'e',
+  KeyF: 'f',
+  KeyG: 'g',
+  KeyH: 'h',
+  KeyI: 'i',
+  KeyJ: 'j',
+  KeyK: 'k',
+  KeyL: 'l',
+  KeyM: 'm',
+  KeyN: 'n',
+  KeyO: 'o',
+  KeyP: 'p',
+  KeyQ: 'q',
+  KeyR: 'r',
+  KeyS: 's',
+  KeyT: 't',
+  KeyU: 'u',
+  KeyV: 'v',
+  KeyW: 'w',
+  KeyX: 'x',
+  KeyY: 'y',
+  KeyZ: 'z',
+  Digit1: '1',
+  Digit2: '2',
+  Digit3: '3',
+  Digit4: '4',
+  Digit5: '5',
+  Digit6: '6',
+  Digit7: '7',
+  Digit8: '8',
+  Digit9: '9',
+  Digit0: '0',
+  Space: 'space',
+  Enter: 'enter',
+  Escape: 'esc',
+  Backspace: 'backspace',
+  Tab: 'tab',
+  CapsLock: 'caps',
+  Delete: 'delete',
+  ArrowUp: '↑',
+  ArrowDown: '↓',
+  ArrowLeft: '←',
+  ArrowRight: '→',
+}
+
 // Normalizes a raw key event into a consistent string
-function normalizeKey(rawKey: string): KeyName {
+function normalizeKey(rawKey: string): string {
   return keyNameMap[rawKey] || rawKey.toLowerCase()
-}
-
-// Export the key name mapping for use in UI components
-export { keyNameMap }
-
-// Heartbeat utility functions
-function handleHeartbeat(_event: HeartbeatEvent) {
-  lastHeartbeatReceived = Date.now()
-}
-
-function startHeartbeatChecker() {
-  if (!heartbeatCheckTimer) {
-    heartbeatCheckTimer = setInterval(() => {
-      const timeSinceLastHeartbeat = Date.now() - lastHeartbeatReceived
-      if (timeSinceLastHeartbeat > HEARTBEAT_TIMEOUT_MS) {
-        console.error(
-          `[Key listener] No heartbeat received for ${timeSinceLastHeartbeat}ms, restarting key listener...`,
-        )
-        restartKeyListener()
-      }
-    }, HEARTBEAT_CHECK_INTERVAL_MS)
-  }
-}
-
-function stopHeartbeatChecker() {
-  if (heartbeatCheckTimer) {
-    clearInterval(heartbeatCheckTimer)
-    heartbeatCheckTimer = null
-  }
-}
-
-function restartKeyListener() {
-  console.warn('🔄 Restarting keyboard listener due to timeout...')
-  stopKeyListener()
-  // Wait a brief moment before restarting to ensure cleanup is complete
-  setTimeout(() => {
-    startKeyListener()
-  }, 1000)
 }
 
 // This set will track the state of all currently pressed keys.
 const pressedKeys = new Set<string>()
 
-// Track when each key was first pressed to detect stuck keys
-const keyPressTimestamps = new Map<KeyName, number>()
-
-// Timer for checking stuck keys
-let stuckKeyCheckTimer: NodeJS.Timeout | null = null
-
-// Configuration for stuck key detection
-const STUCK_KEY_TIMEOUT = 5000 // 5 seconds
-const STUCK_KEY_CHECK_INTERVAL = 1000 // Check every 1 second
-
-// Function to check for and remove stuck keys
-function checkForStuckKeys() {
-  const currentTime = Date.now()
-  const stuckKeys: KeyName[] = []
-
-  for (const [key, pressTime] of keyPressTimestamps) {
-    if (currentTime - pressTime > STUCK_KEY_TIMEOUT) {
-      stuckKeys.push(key)
-    }
-  }
-
-  // Remove stuck keys, but be careful not to interfere with active shortcuts
-  for (const stuckKey of stuckKeys) {
-    // If there's an active shortcut, check if this stuck key is part of it
-    let shouldRemove = true
-
-    if (isShortcutActive) {
-      const { keyboardShortcuts } = store.get(STORE_KEYS.SETTINGS)
-      const activeShortcut = keyboardShortcuts
-        .filter(ks => ks.keys.length > 0)
-        .find(shortcut => {
-          const normalizedShortcutKeys = shortcut.keys.map(normalizeLegacyKey)
-          const hasAllKeys = normalizedShortcutKeys.every(key =>
-            pressedKeys.has(key),
-          )
-          const exactMatch =
-            normalizedShortcutKeys.length === pressedKeys.size && hasAllKeys
-          return exactMatch
-        })
-
-      // Don't remove the stuck key if it's part of the currently active shortcut
-      if (
-        activeShortcut &&
-        activeShortcut.keys.map(normalizeLegacyKey).includes(stuckKey)
-      ) {
-        shouldRemove = false
-      }
-    }
-
-    if (shouldRemove) {
-      console.warn(
-        `Removing stuck key: ${stuckKey} (held for ${(currentTime - keyPressTimestamps.get(stuckKey)!) / 1000}s)`,
-      )
-      pressedKeys.delete(stuckKey)
-      keyPressTimestamps.delete(stuckKey)
-    }
-  }
-}
-
-// Start the stuck key checking timer
-function startStuckKeyChecker() {
-  if (!stuckKeyCheckTimer) {
-    stuckKeyCheckTimer = setInterval(
-      checkForStuckKeys,
-      STUCK_KEY_CHECK_INTERVAL,
-    )
-  }
-}
-
-// Stop the stuck key checking timer
-function stopStuckKeyChecker() {
-  if (stuckKeyCheckTimer) {
-    clearInterval(stuckKeyCheckTimer)
-    stuckKeyCheckTimer = null
-  }
-}
-
 function handleKeyEventInMain(event: KeyEvent) {
-  const { isShortcutGloballyEnabled, keyboardShortcuts } = store.get(
+  const { keyboardShortcut, isShortcutGloballyEnabled } = store.get(
     STORE_KEYS.SETTINGS,
   )
 
@@ -209,77 +121,43 @@ function handleKeyEventInMain(event: KeyEvent) {
 
   if (event.type === 'keydown') {
     pressedKeys.add(normalizedKey)
-    // Track when this key was first pressed (only if not already tracked)
-    if (!keyPressTimestamps.has(normalizedKey)) {
-      keyPressTimestamps.set(normalizedKey, Date.now())
-    }
   } else {
     pressedKeys.delete(normalizedKey)
-    keyPressTimestamps.delete(normalizedKey)
   }
 
-  // Check if any of the configured shortcuts are currently held
-  // Match shortcuts that have exactly the same keys as currently pressed
-  const currentlyHeldShortcut = keyboardShortcuts
-    .filter(ks => ks.keys.length > 0)
-    .find(shortcut => {
-      // Normalize legacy keys in stored shortcuts
-      const normalizedShortcutKeys = shortcut.keys.map(normalizeLegacyKey)
+  // Check if every key required by the shortcut is in our set of pressed keys.
+  const isShortcutHeld =
+    keyboardShortcut && keyboardShortcut.every(key => pressedKeys.has(key))
 
-      // Check if all shortcut keys are pressed (exact match only)
-      const hasAllKeys = normalizedShortcutKeys.every(shortcutKey =>
-        pressedKeys.has(shortcutKey),
-      )
+  // Shortcut pressed
+  if (isShortcutHeld && !isShortcutActive) {
+    isShortcutActive = true
+    console.info('lib Shortcut ACTIVATED, starting recording...')
 
-      const exactMatch =
-        normalizedShortcutKeys.length === pressedKeys.size && hasAllKeys
-
-      return exactMatch
+    // Start trace logging for new interaction
+    const interactionId = traceLogger.startInteraction('HOTKEY_ACTIVATED', {
+      shortcut: keyboardShortcut,
+      pressedKeys: Array.from(pressedKeys),
+      event: {
+        type: event.type,
+        key: event.key,
+        normalizedKey,
+        timestamp: event.timestamp,
+      },
     })
 
-  // Handle shortcut activation with debouncing
-  if (currentlyHeldShortcut && !isShortcutActive) {
-    // New shortcut detected - start debounce timer
-    if (
-      !shortcutDebounceTimeout ||
-      pendingShortcut?.id !== currentlyHeldShortcut.id
-    ) {
-      // Clear any existing timeout
-      if (shortcutDebounceTimeout) {
-        clearTimeout(shortcutDebounceTimeout)
-      }
+    // Store interaction ID for later use
+    ;(globalThis as any).currentInteractionId = interactionId
 
-      pendingShortcut = currentlyHeldShortcut
-      shortcutDebounceTimeout = setTimeout(() => {
-        // After DEBOUNCE milliseconds, if the shortcut is still active, activate it
-        if (pendingShortcut && !isShortcutActive) {
-          isShortcutActive = true
-          console.info('lib Shortcut ACTIVATED, starting recording...')
-          interactionManager.startInteraction()
-          voiceInputService.startSTTService(pendingShortcut.mode)
-        }
+    voiceInputService.startSTTService()
+  } else if (!isShortcutHeld && isShortcutActive) {
+    // Shortcut released
+    isShortcutActive = false
+    console.info('lib Shortcut DEACTIVATED, stopping recording...')
 
-        // Clear debounce state
-        shortcutDebounceTimeout = null
-        pendingShortcut = null
-      }, DEBOUNCE_TIME) // debounce
-    }
-  } else if (!currentlyHeldShortcut) {
-    // No shortcut detected - cancel pending activation or deactivate active shortcut
-    if (shortcutDebounceTimeout) {
-      // Cancel pending activation
-      clearTimeout(shortcutDebounceTimeout)
-      shortcutDebounceTimeout = null
-      pendingShortcut = null
-    } else if (isShortcutActive) {
-      // Shortcut released - deactivate immediately (no debounce on release)
-      isShortcutActive = false
-      console.info('lib Shortcut DEACTIVATED, stopping recording...')
-
-      // Don't end the interaction yet - let the transcription service handle it
-      // The interaction will be ended when transcription completes or fails
-      voiceInputService.stopSTTService()
-    }
+    // Don't end the interaction yet - let the transcription service handle it
+    // The interaction will be ended when transcription completes or fails
+    voiceInputService.stopSTTService()
   }
 }
 
@@ -305,7 +183,6 @@ export const startKeyListener = () => {
       RUST_BACKTRACE: '1',
       OBJC_DISABLE_INITIALIZE_FORK_SAFETY: 'YES',
     }
-
     KeyListenerProcess = spawn(binaryPath, [], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env,
@@ -327,108 +204,66 @@ export const startKeyListener = () => {
       for (const line of lines) {
         if (line.trim()) {
           try {
-            const event: ProcessEvent = JSON.parse(line)
+            const event = JSON.parse(line)
 
-            // Handle heartbeat and other system events
-            if (event.type === 'heartbeat_ping') {
-              handleHeartbeat(event)
-              continue
-            } else if (event.type === 'registered_hotkeys') {
-              // Log registered hotkeys for debugging
-              console.info('🔒 Registered hotkeys received:', event.hotkeys)
-              continue
-            }
+            // 1. Process the event here in the main process for hotkey detection.
+            handleKeyEventInMain(event)
 
-            // Handle regular key events
-            if (event.type === 'keydown' || event.type === 'keyup') {
-              // Process the event here in the main process for hotkey detection.
-              handleKeyEventInMain(event)
-
-              // Filter out Windows key on non-macOS platforms before broadcasting
-              const platform = process.platform
-              const isWindowsKey =
-                event.key === 'MetaLeft' || event.key === 'MetaRight'
-
-              // On Windows, don't broadcast Windows key events to UI
-              if (platform !== 'darwin' && isWindowsKey) {
-                // Silently ignore Windows key for UI components
-                continue
+            // 2. Continue to broadcast the raw event to all renderer windows for UI updates.
+            BrowserWindow.getAllWindows().forEach(window => {
+              if (!window.webContents.isDestroyed()) {
+                window.webContents.send('key-event', event)
               }
-
-              // 3. Continue to broadcast the raw event to all renderer windows for UI updates.
-              BrowserWindow.getAllWindows().forEach(window => {
-                if (!window.webContents.isDestroyed()) {
-                  window.webContents.send('key-event', event)
-                }
-              })
-            }
+            })
           } catch (e) {
-            console.error('Failed to parse key process event:', line, e)
+            console.error('Failed to parse key event:', line, e)
           }
         }
       }
     })
 
     KeyListenerProcess.stderr?.on('data', data => {
-      console.error('[Key listener] stderr:', data.toString())
+      console.error('Key listener stderr:', data.toString())
     })
 
     KeyListenerProcess.on('error', error => {
-      console.error('[Key listener] process spawn error:', error)
+      console.error('Key listener process spawn error:', error)
       KeyListenerProcess = null
     })
 
     KeyListenerProcess.on('close', (code, signal) => {
       console.warn(
-        `[Key listener] process closed with code: ${code}, signal: ${signal}`,
+        `Key listener process exited with code: ${code}, signal: ${signal}`,
       )
       KeyListenerProcess = null
     })
 
-    KeyListenerProcess.on('exit', (code, signal) => {
-      console.warn(
-        `[Key listener] process exited with code: ${code}, signal: ${signal}`,
-      )
-      KeyListenerProcess = null
-    })
-
-    console.log('[Key listener] started successfully.')
-
-    // Register all configured hotkeys with the listener
-    registerAllHotkeys()
-
-    // Start the stuck key checker
-    startStuckKeyChecker()
-
-    // Start heartbeat monitoring
-    lastHeartbeatReceived = Date.now()
-    startHeartbeatChecker()
+    blockKeys(getKeysToBlock())
+    console.log('Key listener started successfully.')
   } catch (error) {
     console.error('Failed to start key listener:', error)
     KeyListenerProcess = null
   }
 }
 
-// Register all hotkeys from settings with the key listener
-export const registerAllHotkeys = () => {
+export const blockKeys = (keys: string[]) => {
   if (!KeyListenerProcess) {
-    console.warn('Key listener not running, cannot register hotkeys.')
+    console.warn('Key listener not running, cannot block keys.')
     return
   }
 
-  const { keyboardShortcuts } = store.get(STORE_KEYS.SETTINGS)
-
-  // Convert shortcuts to hotkey format for the listener
-  const hotkeys = keyboardShortcuts
-    .filter(ks => ks.keys.length > 0)
-    .map(shortcut => ({
-      keys: getKeysToRegister(shortcut),
-    }))
-
-  console.info('Registering hotkeys with listener:', hotkeys)
-
   KeyListenerProcess.stdin?.write(
-    JSON.stringify({ command: 'register_hotkeys', hotkeys }) + '\n',
+    JSON.stringify({ command: 'block', keys }) + '\n',
+  )
+}
+
+export const unblockKey = (key: string) => {
+  if (!KeyListenerProcess) {
+    console.warn('Key listener not running, cannot unblock key.')
+    return
+  }
+  KeyListenerProcess.stdin?.write(
+    JSON.stringify({ command: 'unblock', key }) + '\n',
   )
 }
 
@@ -449,30 +284,16 @@ const reverseKeyNameMap: Record<string, string[]> = Object.entries(
   {} as Record<string, string[]>,
 )
 
-const getKeysToRegister = (shortcut?: KeyboardShortcutConfig): string[] => {
-  if (!shortcut) {
-    return []
-  }
+const getKeysToBlock = (): string[] => {
+  // Use the reverse map to find all raw keys for the normalized shortcut keys.
+  const keys = Array.from(pressedKeys).flatMap(
+    normalizedKey => reverseKeyNameMap[normalizedKey] || [],
+  )
 
-  const keys: string[] = []
-
-  for (const key of shortcut.keys) {
-    // Normalize legacy keys (maps base modifiers to left variants)
-    const normalizedKey = normalizeLegacyKey(key)
-    const reverseMappedKeys = reverseKeyNameMap[normalizedKey]
-
-    if (reverseMappedKeys && reverseMappedKeys.length > 0) {
-      // Use the reverse mapping if available
-      keys.push(...reverseMappedKeys)
-    } else {
-      // Fallback: use the original key name as-is
-      // This works because the key names come from rdev originally
-      keys.push(key)
-    }
-  }
+  const { keyboardShortcut } = store.get(STORE_KEYS.SETTINGS)
 
   // Also block the special "fast fn" key if fn is part of the shortcut.
-  if (shortcut.keys.includes('fn')) {
+  if (keyboardShortcut.includes('fn')) {
     keys.push('Unknown(179)')
   }
 
@@ -484,12 +305,6 @@ export const stopKeyListener = () => {
   if (KeyListenerProcess) {
     // Clear the set on stop to prevent stuck keys if the app restarts.
     pressedKeys.clear()
-    keyPressTimestamps.clear()
-    stopStuckKeyChecker()
-
-    // Clean up heartbeat state
-    stopHeartbeatChecker()
-
     KeyListenerProcess.kill('SIGTERM')
     KeyListenerProcess = null
   }

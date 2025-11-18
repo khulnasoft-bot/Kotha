@@ -30,6 +30,8 @@ jobs:
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: '1.1.20'
 
       - name: Install dependencies
         working-directory: server
@@ -54,14 +56,7 @@ jobs:
           cat out.json
 
           if jq -e '.FunctionError' out.json > /dev/null; then
-            echo "❌ Lambda execution failed:"
-            echo "Message: $(jq -r '.errorMessage' out.json)"
-            exit 1
-          fi
-
-          if jq -e '.errorType' out.json > /dev/null; then
-            echo "❌ Migration failed:"
-            echo "Error: $(jq -r '.errorType' out.json)"
+            echo "❌ Lambda function failed:"
             echo "Message: $(jq -r '.errorMessage' out.json)"
             exit 1
           fi

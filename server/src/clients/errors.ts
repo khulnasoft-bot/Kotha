@@ -37,8 +37,6 @@ export abstract class ClientError extends Error {
     switch (provider) {
       case ClientProvider.GROQ:
         return ClientProviderPb.GROQ
-      case ClientProvider.CEREBRAS:
-        return ClientProviderPb.CEREBRAS
       default:
         return ClientProviderPb.GROQ
     }

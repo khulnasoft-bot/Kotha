@@ -2,13 +2,7 @@ import { useEffect, useState } from 'react'
 import { AudioBarsBase, BAR_COUNT } from './AudioBarsBase'
 
 // A new component to very basic audio visualization
-export const AudioBars = ({
-  volumeHistory,
-  barColor = 'white',
-}: {
-  volumeHistory: number[]
-  barColor?: string
-}) => {
+export const AudioBars = ({ volumeHistory }: { volumeHistory: number[] }) => {
   // Base heights for visual variety
   const bars = Array(BAR_COUNT).fill(1)
   const [activeBarIndex, setActiveBarIndex] = useState(0)
@@ -26,5 +20,5 @@ export const AudioBars = ({
     return Math.min(Math.max(height, 1), 16)
   })
 
-  return <AudioBarsBase heights={dynamicHeights} barColor={barColor} />
+  return <AudioBarsBase heights={dynamicHeights} barColor="white" />
 }

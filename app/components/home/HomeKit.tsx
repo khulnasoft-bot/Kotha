@@ -14,12 +14,10 @@ import DictionaryContent from './contents/DictionaryContent'
 import NotesContent from './contents/NotesContent'
 import SettingsContent from './contents/SettingsContent'
 import AboutContent from './contents/AboutContent'
-import { useTranslation } from 'react-i18next'
 
 export default function HomeKit() {
   const { navExpanded, currentPage, setCurrentPage } = useMainStore()
   const [showText, setShowText] = useState(navExpanded)
-  const { t } = useTranslation()
 
   // Handle text and positioning animation timing
   useEffect(() => {
@@ -78,35 +76,35 @@ export default function HomeKit() {
           <div className="flex flex-col gap-1 text-sm">
             <NavItem
               icon={<Home className="w-5 h-5" />}
-              label={t('navigation.home')}
+              label="Home"
               isActive={currentPage === 'home'}
               showText={showText}
               onClick={() => setCurrentPage('home')}
             />
             <NavItem
               icon={<BookOpen className="w-5 h-5" />}
-              label={t('navigation.dictionary')}
+              label="Dictionary"
               isActive={currentPage === 'dictionary'}
               showText={showText}
               onClick={() => setCurrentPage('dictionary')}
             />
             <NavItem
               icon={<FileText className="w-5 h-5" />}
-              label={t('navigation.notes')}
+              label="Notes"
               isActive={currentPage === 'notes'}
               showText={showText}
               onClick={() => setCurrentPage('notes')}
             />
             <NavItem
               icon={<CogFour className="w-5 h-5" />}
-              label={t('navigation.settings')}
+              label="Settings"
               isActive={currentPage === 'settings'}
               showText={showText}
               onClick={() => setCurrentPage('settings')}
             />
             <NavItem
               icon={<InfoCircle className="w-5 h-5" />}
-              label={t('navigation.about')}
+              label="About"
               isActive={currentPage === 'about'}
               showText={showText}
               onClick={() => setCurrentPage('about')}

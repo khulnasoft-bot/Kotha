@@ -3,7 +3,6 @@ import {
   ChartNoAxesColumn,
   InfoCircle,
   Play,
-  Stop,
   Copy,
   Check,
 } from '@mynaui/icons-react'
@@ -23,12 +22,6 @@ import {
   getTotalWordsLevel,
   getActivityMessage,
 } from './activityMessages'
-import { KothaMode } from '@/app/generated/kotha_pb'
-import { getKeyDisplay } from '@/app/utils/keyboard'
-import { createStereo48kWavFromMonoPCM } from '@/app/utils/audioUtils'
-import { KeyName } from '@/lib/types/keyboard'
-import { usePlatform } from '@/app/hooks/usePlatform'
-import { useTranslation } from 'react-i18next'
 
 // Interface for interaction statistics
 interface InteractionStats {
@@ -63,20 +56,14 @@ const StatCard = ({
 }
 
 export default function HomeContent() {
-  const { getKothaModeShortcuts } = useSettingsStore()
-  const keyboardShortcut = getKothaModeShortcuts(KothaMode.TRANSCRIBE)[0].keys
+  const { keyboardShortcut } = useSettingsStore()
   const { user } = useAuthStore()
   const firstName = user?.name?.split(' ')[0]
-  const platform = usePlatform()
-  const { t } = useTranslation()
   const [interactions, setInteractions] = useState<Interaction[]>([])
   const [loading, setLoading] = useState(true)
   const [playingAudio, setPlayingAudio] = useState<string | null>(null)
-  const [audioInstances, setAudioInstances] = useState<
-    Map<string, HTMLAudioElement>
-  >(new Map())
   const [copiedItems, setCopiedItems] = useState<Set<string>>(new Set())
-  const [openTooltipKey, setOpenTooltipKey] = useState<string | null>(null)
+  const [tooltipOpen, setTooltipOpen] = useState<string | null>(null)
   const [stats, setStats] = useState<InteractionStats>({
     streakDays: 0,
     totalWords: 0,
@@ -233,24 +220,6 @@ export default function HomeContent() {
     return unsubscribe
   }, [loadInteractions])
 
-  // Cleanup audio instances on unmount
-  useEffect(() => {
-    return () => {
-      audioInstances.forEach(audio => {
-        try {
-          audio.pause()
-          audio.currentTime = 0
-          // Best-effort release of object URL if used
-          if (audio.src?.startsWith('blob:')) {
-            URL.revokeObjectURL(audio.src)
-          }
-        } catch {
-          /* ignore */
-        }
-      })
-    }
-  }, [audioInstances])
-
   const formatTime = (dateString: string) => {
     const date = new Date(dateString)
     return date.toLocaleString('en-US', {
@@ -303,13 +272,13 @@ export default function HomeContent() {
         interaction.asr_output.error.includes('Unable to transcribe audio.')
       ) {
         return {
-          text: t('home.audioSilent'),
+          text: 'Audio is silent',
           isError: true,
           tooltip: "Kotha didn't detect any words so the transcript is empty",
         }
       }
       return {
-        text: t('home.transcriptionFailed'),
+        text: 'Transcription failed',
         isError: true,
         tooltip: interaction.asr_output.error,
       }
@@ -320,7 +289,7 @@ export default function HomeContent() {
 
     if (!transcript) {
       return {
-        text: t('home.audioSilent'),
+        text: 'Audio is silent.',
         isError: true,
         tooltip: "Kotha didn't detect any words so the transcript is empty",
       }
@@ -334,32 +303,52 @@ export default function HomeContent() {
     }
   }
 
-  const handleAudioPlayStop = async (interaction: Interaction) => {
-    try {
-      // If this interaction is currently playing, stop it
-      if (playingAudio === interaction.id) {
-        const current = audioInstances.get(interaction.id)
-        if (current) {
-          current.pause()
-          current.currentTime = 0
-          if (current.src?.startsWith('blob:')) {
-            URL.revokeObjectURL(current.src)
-          }
-        }
-        setPlayingAudio(null)
-        return
-      }
+  // Utility function to create WAV file from raw PCM data
+  const createWavFile = (
+    pcmData: Uint8Array,
+    sampleRate = 16000,
+    numChannels = 1,
+    bitsPerSample = 16,
+  ) => {
+    const dataLength = pcmData.length
+    const buffer = new ArrayBuffer(44 + dataLength)
+    const view = new DataView(buffer)
 
-      // Stop any other playing audio
+    // WAV header
+    const writeString = (offset: number, string: string) => {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i))
+      }
+    }
+
+    writeString(0, 'RIFF') // ChunkID
+    view.setUint32(4, 36 + dataLength, true) // ChunkSize
+    writeString(8, 'WAVE') // Format
+    writeString(12, 'fmt ') // Subchunk1ID
+    view.setUint32(16, 16, true) // Subchunk1Size (PCM)
+    view.setUint16(20, 1, true) // AudioFormat (PCM)
+    view.setUint16(22, numChannels, true) // NumChannels
+    view.setUint32(24, sampleRate, true) // SampleRate
+    view.setUint32(28, (sampleRate * numChannels * bitsPerSample) / 8, true) // ByteRate
+    view.setUint16(32, (numChannels * bitsPerSample) / 8, true) // BlockAlign
+    view.setUint16(34, bitsPerSample, true) // BitsPerSample
+    writeString(36, 'data') // Subchunk2ID
+    view.setUint32(40, dataLength, true) // Subchunk2Size
+
+    // Copy PCM data
+    const uint8Array = new Uint8Array(buffer)
+    uint8Array.set(pcmData, 44)
+
+    return buffer
+  }
+
+  const playAudio = async (interaction: Interaction) => {
+    try {
+      // Stop any currently playing audio
       if (playingAudio) {
-        const other = audioInstances.get(playingAudio)
-        if (other) {
-          other.pause()
-          other.currentTime = 0
-          if (other.src?.startsWith('blob:')) {
-            URL.revokeObjectURL(other.src)
-          }
-        }
+        setPlayingAudio(null)
+        // Small delay to ensure previous audio stops
+        await new Promise(resolve => setTimeout(resolve, 100))
       }
 
       if (!interaction.raw_audio) {
@@ -367,55 +356,56 @@ export default function HomeContent() {
         return
       }
 
-      // Set playing state immediately for responsive UI
       setPlayingAudio(interaction.id)
 
-      // Reuse existing audio instance if available
-      let audio = audioInstances.get(interaction.id)
+      // Convert Buffer to Uint8Array for browser compatibility
+      const pcmData = new Uint8Array(interaction.raw_audio)
 
-      if (!audio) {
-        const pcmData = new Uint8Array(interaction.raw_audio)
+      // Try to play as-is first (in case it's already a valid audio format)
+      let audioBlob = new Blob([pcmData], { type: 'audio/wav' })
+      let audioUrl = URL.createObjectURL(audioBlob)
+
+      // Create and play the audio
+      const audio = new Audio(audioUrl)
+
+      audio.onended = () => {
+        setPlayingAudio(null)
+        URL.revokeObjectURL(audioUrl) // Clean up memory
+      }
+
+      audio.onerror = async _error => {
+        console.log(
+          'Direct playback failed, trying as raw PCM with WAV headers...',
+        )
+        URL.revokeObjectURL(audioUrl)
+
         try {
-          // Convert raw PCM (mono, typically 16 kHz) to 48 kHz stereo WAV for smoother playback
-          const wavBuffer = createStereo48kWavFromMonoPCM(
-            pcmData,
-            interaction.sample_rate || 16000,
-            48000,
-          )
-          const audioBlob = new Blob([wavBuffer], { type: 'audio/wav' })
-          const audioUrl = URL.createObjectURL(audioBlob)
+          // If direct playback fails, try converting raw PCM to WAV
+          const wavBuffer = createWavFile(pcmData)
+          audioBlob = new Blob([wavBuffer], { type: 'audio/wav' })
+          audioUrl = URL.createObjectURL(audioBlob)
 
-          audio = new Audio(audioUrl)
-          audio.onended = () => {
+          const newAudio = new Audio(audioUrl)
+          newAudio.onended = () => {
             setPlayingAudio(null)
-            if (audio && audio.src?.startsWith('blob:')) {
-              URL.revokeObjectURL(audio.src)
-            }
+            URL.revokeObjectURL(audioUrl)
           }
-          audio.onerror = err => {
-            console.error('Audio playback error:', err)
+          newAudio.onerror = err => {
+            console.error('WAV playback also failed:', err)
             setPlayingAudio(null)
-            if (audio && audio.src?.startsWith('blob:')) {
-              URL.revokeObjectURL(audio.src)
-            }
+            URL.revokeObjectURL(audioUrl)
           }
 
-          setAudioInstances(prev => new Map(prev).set(interaction.id, audio!))
-        } catch (error) {
-          console.error('Failed to create audio instance:', error)
+          await newAudio.play()
+        } catch (wavError) {
+          console.error('Failed to create/play WAV file:', wavError)
           setPlayingAudio(null)
-          return
         }
       }
 
-      try {
-        await audio.play()
-      } catch (playError) {
-        console.error('Failed to start audio playback:', playError)
-        setPlayingAudio(null)
-      }
+      await audio.play()
     } catch (error) {
-      console.error('Failed to play/stop audio:', error)
+      console.error('Failed to play audio:', error)
       setPlayingAudio(null)
     }
   }
@@ -426,7 +416,7 @@ export default function HomeContent() {
     try {
       await navigator.clipboard.writeText(text)
       setCopiedItems(prev => new Set(prev).add(interactionId))
-      setOpenTooltipKey(`copy:${interactionId}`) // Keep tooltip open
+      setTooltipOpen(interactionId) // Keep tooltip open
 
       // Reset the copied state after 2 seconds
       setTimeout(() => {
@@ -435,10 +425,8 @@ export default function HomeContent() {
           newSet.delete(interactionId)
           return newSet
         })
-        // Close tooltip if it's still open for this item (do not override if user hovered elsewhere)
-        setOpenTooltipKey(prev =>
-          prev === `copy:${interactionId}` ? null : prev,
-        )
+        // Close tooltip if it's still open for this item
+        setTooltipOpen(prev => (prev === interactionId ? null : prev))
       }, 2000)
     } catch (error) {
       console.error('Failed to copy text:', error)
@@ -452,14 +440,14 @@ export default function HomeContent() {
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-2xl font-medium">
-              {firstName ? t('home.welcomeBack', { name: firstName }) : t('home.welcome')}
+              Welcome back{firstName ? `, ${firstName}!` : '!'}
             </h1>
           </div>
         </div>
         <div className="flex gap-4 w-full mb-6">
           <div className="flex w-full items-center text-sm text-gray-700 gap-2">
             <StatCard
-              title={t('home.weeklyStreak')}
+              title="Weekly Streak"
               value={formatStreakText(stats.streakDays)}
               description={getActivityMessage(
                 STREAK_MESSAGES,
@@ -475,8 +463,8 @@ export default function HomeContent() {
               }
             />
             <StatCard
-              title={t('home.averageSpeed')}
-              value={`${stats.averageWPM} ${t('home.wordsPerMinute')}`}
+              title="Average Speed"
+              value={`${stats.averageWPM} words / minute`}
               description={getActivityMessage(
                 SPEED_MESSAGES,
                 getSpeedLevel(stats.averageWPM),
@@ -488,8 +476,8 @@ export default function HomeContent() {
               }
             />
             <StatCard
-              title={t('home.totalWords')}
-              value={`${stats.totalWords} ${stats.totalWords === 1 ? t('home.word') : t('home.words')}`}
+              title="Total Words"
+              value={`${stats.totalWords} ${stats.totalWords === 1 ? 'word' : 'words'}`}
               description={getActivityMessage(
                 TOTAL_WORDS_MESSAGES,
                 getTotalWordsLevel(stats.totalWords),
@@ -507,21 +495,19 @@ export default function HomeContent() {
         <div className="bg-slate-100 rounded-xl p-6 flex items-center justify-between mb-10">
           <div>
             <div className="text-base font-medium mb-1">
-              {t('home.voiceDictation')}
+              Voice dictation in any app
             </div>
             <div className="text-sm text-gray-600">
-              <span key="hold-down">{t('home.dictationDescription')}</span>
+              <span key="hold-down">Hold down the trigger key </span>
               {keyboardShortcut.map((key, index) => (
                 <React.Fragment key={index}>
                   <span className="bg-slate-50 px-1 py-0.5 rounded text-xs font-mono shadow-sm">
-                    {getKeyDisplay(key as KeyName, platform, {
-                      showDirectionalText: false,
-                      format: 'label',
-                    })}
+                    {key}
                   </span>
                   <span>{index < keyboardShortcut.length - 1 && ' + '}</span>
                 </React.Fragment>
               ))}
+              <span key="and"> and speak into any textbox</span>
             </div>
           </div>
           <button
@@ -530,13 +516,13 @@ export default function HomeContent() {
               window.api?.invoke('web-open-url', EXTERNAL_LINKS.WEBSITE)
             }
           >
-            {t('home.exploreUseCases')}
+            Explore use cases
           </button>
         </div>
 
         {/* Recent Activity Header */}
         <div className="text-sm text-muted-foreground mb-6">
-          {t('home.recentActivity')}
+          Recent activity
         </div>
       </div>
 
@@ -544,13 +530,14 @@ export default function HomeContent() {
       <div className="flex-1 px-24 overflow-y-auto scrollbar-hide">
         {loading ? (
           <div className="bg-white rounded-lg border border-slate-200 p-8 text-center text-gray-500">
-            {t('home.loadingActivity')}
+            Loading recent activity...
           </div>
         ) : interactions.length === 0 ? (
           <div className="bg-white rounded-lg border border-slate-200 p-8 text-center text-gray-500">
-            <p className="text-sm">{t('home.noInteractions')}</p>
+            <p className="text-sm">No interactions yet</p>
             <p className="text-xs mt-1">
-              {t('home.tryDictation')} {keyboardShortcut.join(' + ')}
+              Try using voice dictation by pressing{' '}
+              {keyboardShortcut.join(' + ')}
             </p>
           </div>
         ) : (
@@ -595,21 +582,10 @@ export default function HomeContent() {
                           {/* Copy button */}
                           {!displayInfo.isError && (
                             <Tooltip
-                              open={openTooltipKey === `copy:${interaction.id}`}
+                              open={tooltipOpen === interaction.id}
                               onOpenChange={open => {
-                                if (open) {
-                                  // Opening: exclusively show this tooltip
-                                  setOpenTooltipKey(`copy:${interaction.id}`)
-                                } else {
-                                  // Closing: if in copied state, keep it open until timer clears,
-                                  // otherwise close normally
-                                  if (!copiedItems.has(interaction.id)) {
-                                    setOpenTooltipKey(prev =>
-                                      prev === `copy:${interaction.id}`
-                                        ? null
-                                        : prev,
-                                    )
-                                  }
+                                if (!copiedItems.has(interaction.id)) {
+                                  setTooltipOpen(open ? interaction.id : null)
                                 }
                               }}
                             >
@@ -634,48 +610,37 @@ export default function HomeContent() {
                                   )}
                                 </button>
                               </TooltipTrigger>
-                              <TooltipContent side="top" sideOffset={5}>
-                                {copiedItems.has(interaction.id)
-                                  ? t('home.copied')
-                                  : t('home.copy')}
+                              <TooltipContent>
+                                <p>
+                                  {copiedItems.has(interaction.id)
+                                    ? 'Copied 🎉'
+                                    : 'Copy'}
+                                </p>
                               </TooltipContent>
                             </Tooltip>
                           )}
 
-                          {/* Play/Stop button with tooltip */}
-                          <Tooltip
-                            open={openTooltipKey === `play:${interaction.id}`}
-                            onOpenChange={open => {
-                              setOpenTooltipKey(
-                                open ? `play:${interaction.id}` : null,
-                              )
-                            }}
-                          >
-                            <TooltipTrigger asChild>
-                              <button
-                                className={`p-1.5 hover:bg-gray-200 rounded transition-colors cursor-pointer ${
-                                  playingAudio === interaction.id
-                                    ? 'bg-blue-50 text-blue-600'
-                                    : 'text-gray-600'
-                                }`}
-                                onClick={() => handleAudioPlayStop(interaction)}
-                                disabled={!interaction.raw_audio}
-                              >
-                                {playingAudio === interaction.id ? (
-                                  <Stop className="w-4 h-4" />
-                                ) : (
-                                  <Play className="w-4 h-4" />
-                                )}
-                              </button>
-                            </TooltipTrigger>
-                            <TooltipContent side="top" sideOffset={5}>
-                              {!interaction.raw_audio
-                                ? t('home.noAudioAvailable')
+                          {/* Play button */}
+                          <button
+                            className={`p-1.5 hover:bg-gray-200 rounded transition-colors cursor-pointer ${
+                              playingAudio === interaction.id
+                                ? 'bg-blue-50 text-blue-600'
+                                : 'text-gray-600'
+                            }`}
+                            onClick={() => playAudio(interaction)}
+                            disabled={!interaction.raw_audio}
+                            title={
+                              !interaction.raw_audio
+                                ? 'No audio available'
                                 : playingAudio === interaction.id
-                                  ? t('home.stop')
-                                  : t('home.play')}
-                            </TooltipContent>
-                          </Tooltip>
+                                  ? 'Playing audio...'
+                                  : 'Play audio'
+                            }
+                          >
+                            <Play
+                              className={`w-4 h-4 ${playingAudio === interaction.id ? 'animate-pulse' : ''}`}
+                            />
+                          </button>
                         </div>
                       </div>
                     )

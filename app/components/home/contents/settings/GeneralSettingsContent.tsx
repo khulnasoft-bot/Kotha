@@ -8,12 +8,10 @@ export default function GeneralSettingsContent() {
     launchAtLogin,
     showKothaBarAlways,
     showAppInDock,
-    language,
     setShareAnalytics,
     setLaunchAtLogin,
     setShowKothaBarAlways,
     setShowAppInDock,
-    setLanguage,
   } = useSettingsStore()
 
   const windowContext = useWindowContext()
@@ -22,23 +20,6 @@ export default function GeneralSettingsContent() {
     <div className="space-y-8">
       <div>
         <div className="space-y-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm font-medium">Language / ভাষা</div>
-              <div className="text-xs text-gray-600 mt-1">
-                Select your preferred language / আপনার পছন্দের ভাষা নির্বাচন করুন
-              </div>
-            </div>
-            <select
-              value={language}
-              onChange={(e) => setLanguage(e.target.value as 'en' | 'bn')}
-              className="px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="en">English</option>
-              <option value="bn">বাংলা</option>
-            </select>
-          </div>
-
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm font-medium">Share analytics</div>

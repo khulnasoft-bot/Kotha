@@ -1,5 +1,4 @@
-export type KothaContext = {
+export type WindowContext = {
   windowTitle: string
   appName: string
-  contextText: string
 }

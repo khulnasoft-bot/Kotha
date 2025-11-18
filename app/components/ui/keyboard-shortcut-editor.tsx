@@ -1,17 +1,12 @@
-import { useEffect, useCallback, useRef, useState, useMemo } from 'react'
+import { useEffect, useCallback, useRef, useState } from 'react'
 import { Button } from '@/app/components/ui/button'
 import KeyboardKey from '@/app/components/ui/keyboard-key'
-import { KeyState, isReservedCombination } from '@/app/utils/keyboard'
-import { keyNameMap } from '@/lib/types/keyboard'
+import { KeyState, normalizeKeyEvent } from '@/app/utils/keyboard'
 import { useAudioStore } from '@/app/store/useAudioStore'
-import { KeyboardShortcutConfig } from './multi-shortcut-editor'
-import { KeyName } from '@/lib/types/keyboard'
-import { usePlatform } from '@/app/hooks/usePlatform'
-import { useShortcutEditingStore } from '@/app/store/useShortcutEditingStore'
 
 interface KeyboardShortcutEditorProps {
-  shortcut: KeyboardShortcutConfig
-  onShortcutChange: (shortcutId: string, newShortcutKeys: string[]) => void
+  shortcut: string[]
+  onShortcutChange: (newShortcut: string[]) => void
   hideTitle?: boolean
   className?: string
   keySize?: number
@@ -25,8 +20,6 @@ interface KeyboardShortcutEditorProps {
   editButtonClassName?: string
   confirmButtonClassName?: string
 }
-
-const MAX_KEYS_PER_SHORTCUT = 5
 
 export default function KeyboardShortcutEditor({
   shortcut,
@@ -44,23 +37,12 @@ export default function KeyboardShortcutEditor({
   editButtonClassName = '',
   confirmButtonClassName = '',
 }: KeyboardShortcutEditorProps) {
-  const shortcutKeys = shortcut.keys
-  const platform = usePlatform()
-  const editorKey = useMemo(
-    () => `keyboard-shortcut-editor:${shortcut.id}`,
-    [shortcut.id],
-  )
-  const { start, stop, activeEditor } = useShortcutEditingStore()
-
   const cleanupRef = useRef<(() => void) | null>(null)
-  const keyStateRef = useRef<KeyState>(new KeyState(shortcutKeys))
+  const keyStateRef = useRef<KeyState>(new KeyState(shortcut))
   const [pressedKeys, setPressedKeys] = useState<string[]>([])
   const [isEditing, setIsEditing] = useState(false)
-  const [newShortcut, setNewShortcut] = useState<KeyName[]>([])
-  const [validationError, setValidationError] = useState<string>('')
-  const [temporaryError, setTemporaryError] = useState<string>('')
+  const [newShortcut, setNewShortcut] = useState<string[]>([])
   const { setIsShortcutEnabled } = useAudioStore()
-  const errorTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   const handleKeyEvent = useCallback(
     (event: any) => {
@@ -74,57 +56,25 @@ export default function KeyboardShortcutEditor({
       if (isEditing) {
         // In edit mode, handle adding/removing keys
         if (event.type === 'keydown') {
-          const normalizedKey = keyNameMap[event.key] || event.key.toLowerCase()
+          const normalizedKey = normalizeKeyEvent(event)
           if (normalizedKey === 'fn_fast') {
             return
           }
-
-          let updatedShortcut: KeyName[]
           if (!newShortcut.includes(normalizedKey)) {
-            // Check if we're at the limit before adding
-            if (newShortcut.length >= MAX_KEYS_PER_SHORTCUT) {
-              // Clear any existing timeout
-              if (errorTimeoutRef.current) {
-                clearTimeout(errorTimeoutRef.current)
-              }
-
-              // Show temporary error
-              setTemporaryError(`Maximum ${MAX_KEYS_PER_SHORTCUT} keys allowed`)
-
-              // Clear temporary error after 2 seconds
-              errorTimeoutRef.current = setTimeout(() => {
-                setTemporaryError('')
-                errorTimeoutRef.current = null
-              }, 2000)
-
-              return
-            }
-            updatedShortcut = [...newShortcut, normalizedKey]
+            setNewShortcut(prev => [...prev, normalizedKey])
           } else {
-            updatedShortcut = newShortcut.filter(key => key !== normalizedKey)
+            setNewShortcut(prev => prev.filter(key => key !== normalizedKey))
           }
-
-          // Check for reserved combinations
-          const reservedCheck = isReservedCombination(updatedShortcut, platform)
-          if (reservedCheck.isReserved) {
-            setValidationError(
-              reservedCheck.reason || 'This key combination is reserved',
-            )
-          } else {
-            setValidationError('')
-          }
-
-          setNewShortcut(updatedShortcut)
         }
       }
     },
-    [isEditing, newShortcut, platform],
+    [isEditing, newShortcut],
   )
 
   useEffect(() => {
     // Update key state when shortcut changes
-    keyStateRef.current.updateShortcut(shortcutKeys)
-  }, [shortcut, shortcutKeys])
+    keyStateRef.current.updateShortcut(shortcut)
+  }, [shortcut])
 
   useEffect(() => {
     // Capture the current keyState ref value for cleanup
@@ -154,27 +104,7 @@ export default function KeyboardShortcutEditor({
     }
   }, [handleKeyEvent, isEditing])
 
-  useEffect(() => {
-    return () => {
-      if (isEditing) {
-        window.api.send(
-          'electron-store-set',
-          'settings.isShortcutGloballyEnabled',
-          true,
-        )
-        stop(editorKey)
-      }
-      // Clean up any pending error timeout
-      if (errorTimeoutRef.current) {
-        clearTimeout(errorTimeoutRef.current)
-      }
-    }
-  }, [isEditing, stop, editorKey])
-
   const handleStartEditing = () => {
-    if (!start(editorKey)) {
-      return
-    }
     // Disable the shortcut in the main process via IPC
     window.api.send(
       'electron-store-set',
@@ -184,8 +114,6 @@ export default function KeyboardShortcutEditor({
     setIsShortcutEnabled(false)
     setIsEditing(true)
     setNewShortcut([])
-    setValidationError('')
-    setTemporaryError('')
   }
 
   const handleCancel = () => {
@@ -197,8 +125,6 @@ export default function KeyboardShortcutEditor({
     setIsShortcutEnabled(true)
     setIsEditing(false)
     setNewShortcut([])
-    setTemporaryError('')
-    stop(editorKey)
   }
 
   const handleSave = () => {
@@ -207,7 +133,7 @@ export default function KeyboardShortcutEditor({
       return
     }
     keyStateRef.current.updateShortcut(newShortcut)
-    onShortcutChange(shortcut.id, newShortcut)
+    onShortcutChange(newShortcut)
     setIsEditing(false)
     setIsShortcutEnabled(true)
     window.api.send(
@@ -215,11 +141,6 @@ export default function KeyboardShortcutEditor({
       'settings.isShortcutGloballyEnabled',
       true,
     )
-    stop(editorKey)
-  }
-
-  function isDisplayKeyPressed(displayKey: string, pressed: string[]): boolean {
-    return pressed.includes(displayKey.toLowerCase())
   }
 
   return (
@@ -248,15 +169,10 @@ export default function KeyboardShortcutEditor({
             ))}
             {newShortcut.length === 0 && (
               <div className="text-gray-400 text-sm">
-                Press keys to add them (max {MAX_KEYS_PER_SHORTCUT} keys)
+                Press keys to add them
               </div>
             )}
           </div>
-          {(validationError || temporaryError) && (
-            <div className="text-red-500 text-sm text-center mb-2">
-              {temporaryError || validationError}
-            </div>
-          )}
           <div className="flex gap-2 justify-end w-full mt-1">
             <Button
               variant="outline"
@@ -270,7 +186,7 @@ export default function KeyboardShortcutEditor({
               size="sm"
               type="button"
               onClick={handleSave}
-              disabled={newShortcut.length === 0 || !!validationError}
+              disabled={newShortcut.length === 0}
             >
               Save
             </Button>
@@ -287,11 +203,11 @@ export default function KeyboardShortcutEditor({
             className="flex justify-center items-center mb-4 w-full bg-neutral-100 py-3 rounded-lg gap-2"
             style={{ minHeight }}
           >
-            {shortcutKeys.map((keyboardKey, index) => (
+            {shortcut.map((keyboardKey, index) => (
               <KeyboardKey
                 key={index}
                 keyboardKey={keyboardKey}
-                className={`${isDisplayKeyPressed(String(keyboardKey), pressedKeys) ? 'bg-purple-50 border-2 border-purple-200' : 'bg-white border-2 border-neutral-300'}`}
+                className={`${pressedKeys.includes(keyboardKey.toLowerCase()) ? 'bg-purple-50 border-2 border-purple-200' : 'bg-white border-2 border-neutral-300'}`}
                 style={{
                   width: `${keySize}px`,
                   height: `${keySize}px`,
@@ -306,7 +222,6 @@ export default function KeyboardShortcutEditor({
               type="button"
               onClick={handleStartEditing}
               className={editButtonClassName}
-              disabled={activeEditor !== null && activeEditor !== editorKey}
             >
               {editButtonText}
             </Button>
@@ -316,7 +231,6 @@ export default function KeyboardShortcutEditor({
                 type="button"
                 onClick={onConfirm}
                 className={confirmButtonClassName}
-                disabled={activeEditor !== null && activeEditor !== editorKey}
               >
                 {confirmButtonText}
               </Button>

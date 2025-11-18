@@ -125,13 +125,7 @@ describe('Store Management', () => {
               muteAudioWhenDictating: false,
               microphoneDeviceId: 'default',
               microphoneName: 'Auto-detect',
-              keyboardShortcuts: expect.arrayContaining([
-                expect.objectContaining({
-                  id: expect.any(String),
-                  keys: expect.any(Array),
-                  mode: expect.any(Number),
-                }),
-              ]),
+              keyboardShortcut: ['fn'],
               isShortcutGloballyEnabled: false,
             }),
             main: expect.objectContaining({
@@ -142,7 +136,6 @@ describe('Store Management', () => {
               tokens: null,
               state: expect.any(Object),
             }),
-            appliedMigrations: expect.any(Array),
           }),
         }),
       )
@@ -168,14 +161,35 @@ describe('Store Management', () => {
 
       await import('./store')
 
-      // Should set missing properties from defaults
+      // Should merge defaults with existing partial data
       expect(mockStoreInstance.set).toHaveBeenCalledWith(
-        'settings.launchAtLogin',
-        true,
+        'settings',
+        expect.objectContaining({
+          shareAnalytics: false, // From existing data
+          launchAtLogin: true, // From defaults
+          showKothaBarAlways: true, // From defaults
+        }),
       )
       expect(mockStoreInstance.set).toHaveBeenCalledWith(
-        'onboarding.onboardingStep',
-        0,
+        'main',
+        expect.objectContaining({
+          navExpanded: false, // From existing data
+        }),
+      )
+      expect(mockStoreInstance.set).toHaveBeenCalledWith(
+        'onboarding',
+        expect.objectContaining({
+          onboardingStep: 0, // From defaults
+          onboardingCompleted: true, // From existing data
+        }),
+      )
+      expect(mockStoreInstance.set).toHaveBeenCalledWith(
+        'auth',
+        expect.objectContaining({
+          user: { id: 'test-user' }, // From existing data
+          tokens: null, // From defaults
+          state: expect.any(Object), // From defaults
+        }),
       )
     })
   })

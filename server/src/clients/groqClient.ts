@@ -1,6 +1,9 @@
 import Groq from 'groq-sdk'
 import { toFile } from 'groq-sdk/uploads'
 import * as dotenv from 'dotenv'
+import { KOTHA_MODE_PROMPT, KothaMode } from '../services/kotha/constants.js'
+import { addContextToPrompt } from '../services/kotha/helpers.js'
+import { WindowContext } from '../services/kotha/types.js'
 import { createTranscriptionPrompt } from '../prompts/transcription.js'
 import {
   ClientApiKeyError,
@@ -13,19 +16,17 @@ import {
   ClientError,
 } from './errors.js'
 import { ClientProvider } from './providers.js'
-import { LlmProvider } from './llmProvider.js'
-import { TranscriptionOptions } from './asrConfig.js'
-import { IntentTranscriptionOptions } from './intentTranscriptionConfig.js'
-import { DEFAULT_ADVANCED_SETTINGS } from '../constants/generated-defaults.js'
 
 // Load environment variables from .env file
 dotenv.config()
-export const kothaVocabulary = ['Kotha', 'Hey Kotha']
+export constkothaVocabulary = ['Kotha', 'Hey Kotha']
+export const NO_SPEECH_THRESHOLD = 0.35
+export const LOW_QUALITY_THRESHOLD = -0.55
 
 /**
  * A TypeScript client for interacting with the Groq API, inspired by your Python implementation.
  */
-class GroqClient implements LlmProvider {
+class GroqClient {
   private readonly _client: Groq
   private readonly _userCommandModel: string
   private readonly _isValid: boolean
@@ -52,62 +53,55 @@ class GroqClient implements LlmProvider {
    * @returns The adjusted transcript.
    */
   public async adjustTranscript(
-    userPrompt: string,
-    options?: IntentTranscriptionOptions,
+    transcript: string,
+    mode: KothaMode,
+    context?: WindowContext,
   ): Promise<string> {
     if (!this.isAvailable) {
       throw new ClientUnavailableError(ClientProvider.GROQ)
     }
-
-    const temperature = options?.temperature ?? 0.7
-    const model = options?.model || this._userCommandModel
-    const systemPrompt =
-      options?.prompt ||
-      'Adjust and improve this transcript for clarity and accuracy.'
-
+    const defaultPrompt =
+      'You are a dictation assistant named Kotha. Your job is to fulfill the intent of the transcript without asking follow up questions.'
     try {
       const completion = await this._client.chat.completions.create({
         messages: [
           {
             role: 'system',
-            content: systemPrompt,
+            content: addContextToPrompt(
+              KOTHA_MODE_PROMPT[mode] || defaultPrompt,
+              context,
+            ),
           },
           {
             role: 'user',
-            content: userPrompt,
+            content: `The user's transcript: ${transcript}`,
           },
         ],
-        model,
-        temperature,
+        model: 'openai/gpt-oss-120b',
+        temperature: 0.1,
       })
 
-      // Return a space to enable emptying the document
-      return completion.choices[0]?.message?.content?.trim() || ' '
+      return completion.choices[0]?.message?.content?.trim() || transcript
     } catch (error: any) {
       console.error('An error occurred during transcript adjustment:', error)
-      return userPrompt
+      return transcript
     }
   }
 
   /**
    * Transcribes an audio buffer using the Groq API.
    * @param audioBuffer The audio data as a Node.js Buffer.
-   * @param options Optional transcription configuration.
+   * @param fileType The extension of the audio file type (e.g., 'webm', 'wav').
+   * @param vocabulary Optional custom vocabulary to improve transcription accuracy.
+   * @param asrModel The ASR model to use for transcription (required).
    * @returns The transcribed text as a string.
    */
   public async transcribeAudio(
     audioBuffer: Buffer,
-    options?: TranscriptionOptions,
+    fileType: string = 'webm',
+    asrModel: string,
+    vocabulary?: string[],
   ): Promise<string> {
-    const fileType = options?.fileType || 'webm'
-    const asrModel = options?.asrModel
-    const vocabulary = options?.vocabulary
-    const noSpeechThreshold =
-      options?.noSpeechThreshold ?? DEFAULT_ADVANCED_SETTINGS.noSpeechThreshold
-    const lowQualityThreshold =
-      options?.lowQualityThreshold ??
-      DEFAULT_ADVANCED_SETTINGS.lowQualityThreshold
-
     const file = await toFile(audioBuffer, `audio.${fileType}`)
     if (!this.isAvailable) {
       throw new ClientUnavailableError(ClientProvider.GROQ)
@@ -121,7 +115,7 @@ class GroqClient implements LlmProvider {
         `Transcribing ${audioBuffer.length} bytes of audio using model ${asrModel}...`,
       )
 
-      const fullVocabulary = [...kothaVocabulary, ...(vocabulary || [])]
+      const fullVocabulary = [...itoVocabulary, ...(vocabulary || [])]
 
       // Create a concise but effective transcription prompt
       const transcriptionPrompt = createTranscriptionPrompt(fullVocabulary)
@@ -138,12 +132,12 @@ class GroqClient implements LlmProvider {
       const segments = (transcription as any).segments
       if (segments && segments.length > 0) {
         const segment = segments[0]
-        if (segment.no_speech_prob > noSpeechThreshold) {
+        if (segment.no_speech_prob > NO_SPEECH_THRESHOLD) {
           throw new ClientNoSpeechError(
             ClientProvider.GROQ,
             segment.no_speech_prob,
           )
-        } else if (segment.avg_logprob < lowQualityThreshold) {
+        } else if (segment.avg_logprob < LOW_QUALITY_THRESHOLD) {
           throw new ClientTranscriptionQualityError(
             ClientProvider.GROQ,
             segment.avg_logprob,

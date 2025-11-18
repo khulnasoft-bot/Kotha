@@ -1,9 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useSettingsStore } from '../../store/useSettingsStore'
-import {
-  useOnboardingStore,
-  ONBOARDING_CATEGORIES,
-} from '../../store/useOnboardingStore'
+import { useOnboardingStore } from '../../store/useOnboardingStore'
 import { Tooltip, TooltipTrigger, TooltipContent } from '../ui/tooltip'
 import { X, StopSquare } from '@mynaui/icons-react'
 import { AudioBars } from './contents/AudioBars'
@@ -11,8 +8,6 @@ import { PreviewAudioBars } from './contents/PreviewAudioBars'
 import { useAudioStore } from '@/app/store/useAudioStore'
 import { TooltipButton } from './contents/TooltipButton'
 import { analytics, ANALYTICS_EVENTS } from '../analytics'
-import type { RecordingStatePayload } from '@/lib/types/ipc'
-import { KothaMode } from '@/app/generated/kotha_pb'
 
 const globalStyles = `
   html, body, #app {
@@ -43,18 +38,6 @@ const globalStyles = `
 
 const BAR_UPDATE_INTERVAL = 64
 
-// Color mapping for different recording modes
-const getAudioBarColor = (mode: KothaMode | undefined): string => {
-  switch (mode) {
-    case KothaMode.TRANSCRIBE:
-      return 'white'
-    case KothaMode.EDIT:
-      return '#FFCF40'
-    default:
-      return 'white' // Default to white for transcribe mode
-  }
-}
-
 const Pill = () => {
   // Get initial values from store using separate selectors to avoid infinite re-renders
   const initialShowKothaBarAlways = useSettingsStore(
@@ -71,7 +54,6 @@ const Pill = () => {
   const [isRecording, setIsRecording] = useState(false)
   const [isManualRecording, setIsManualRecording] = useState(false)
   const [isHovered, setIsHovered] = useState(false)
-  const [recordingMode, setRecordingMode] = useState<KothaMode | undefined>()
   const isManualRecordingRef = useRef(false)
   const [showKothaBarAlways, setShowKothaBarAlways] = useState(
     initialShowKothaBarAlways,
@@ -90,10 +72,9 @@ const Pill = () => {
     // Listen for recording state changes from the main process
     const unsubRecording = window.api.on(
       'recording-state-update',
-      (state: RecordingStatePayload) => {
+      (state: { isRecording: boolean }) => {
         // Update recording state - this is for global hotkey triggered recording
         setIsRecording(state.isRecording)
-        setRecordingMode(state.mode)
 
         // Only track general recording analytics if it's not a manual recording
         if (!isManualRecordingRef.current) {
@@ -102,7 +83,6 @@ const Pill = () => {
             : ANALYTICS_EVENTS.RECORDING_COMPLETED
           analytics.track(analyticsEvent, {
             is_recording: state.isRecording,
-            mode: state.mode,
           })
         }
 
@@ -110,7 +90,6 @@ const Pill = () => {
         if (!state.isRecording) {
           setIsManualRecording(false)
           isManualRecordingRef.current = false
-          setRecordingMode(undefined)
         }
         setVolumeHistory([])
       },
@@ -146,32 +125,12 @@ const Pill = () => {
       },
     )
 
-    // Listen for user auth updates from the main process
-    const unsubUserAuth = window.api.on('user-auth-update', (authUser: any) => {
-      if (authUser) {
-        analytics.identifyUser(
-          authUser.id,
-          {
-            user_id: authUser.id,
-            email: authUser.email,
-            name: authUser.name,
-            provider: authUser.provider,
-          },
-          authUser.provider,
-        )
-      } else {
-        // User logged out
-        analytics.resetUser()
-      }
-    })
-
     // Cleanup listeners when the component unmounts
     return () => {
       unsubRecording()
       unsubVolume()
       unsubSettings()
       unsubOnboarding()
-      unsubUserAuth()
     }
   }, [volumeHistory, lastVolumeUpdate])
 
@@ -188,8 +147,7 @@ const Pill = () => {
   // Determine current state
   const anyRecording = isRecording || isManualRecording
   const shouldShow =
-    (onboardingCategory === ONBOARDING_CATEGORIES.TRY_IT ||
-      onboardingCompleted) &&
+    (onboardingCategory === 'try-it' || onboardingCompleted) &&
     (anyRecording || showKothaBarAlways || isHovered)
 
   // Calculate dimensions based on state
@@ -228,7 +186,6 @@ const Pill = () => {
     // Show/hide animation using opacity and scale instead of display none/flex
     opacity: shouldShow ? 1 : 0,
     transform: shouldShow ? 'scale(1)' : 'scale(0.8)',
-    transformOrigin: 'bottom center',
     visibility: shouldShow ? 'visible' : 'hidden',
 
     // Static styles
@@ -316,10 +273,7 @@ const Pill = () => {
             tooltip="Cancel"
           />
 
-          <AudioBars
-            volumeHistory={volumeHistory}
-            barColor={getAudioBarColor(recordingMode)}
-          />
+          <AudioBars volumeHistory={volumeHistory} />
 
           <TooltipButton
             onClick={handleStop}
@@ -331,12 +285,7 @@ const Pill = () => {
     }
 
     if (anyRecording) {
-      return (
-        <AudioBars
-          volumeHistory={volumeHistory}
-          barColor={getAudioBarColor(recordingMode)}
-        />
-      )
+      return <AudioBars volumeHistory={volumeHistory} />
     }
 
     if (isHovered) {

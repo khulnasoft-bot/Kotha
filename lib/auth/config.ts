@@ -15,7 +15,6 @@ export const Auth0Connections = {
   microsoft: 'windowslive',
   apple: 'apple',
   github: 'github',
-  database: 'kotha-email-password',
 }
 
 export const RequiredAuth0Fields = [

@@ -107,7 +107,6 @@ import {
   revertLastMigration,
   wipeDatabase,
 } from './db'
-import path from 'path'
 
 describe('Database State Management', () => {
   beforeEach(() => {
@@ -362,8 +361,7 @@ describe('File Error Handling', () => {
 
     await wipeDatabase()
 
-    const expectedPath = path.join('/tmp/test-kotha-app', 'kotha.db')
-    expect(mockFs.unlink).toHaveBeenCalledWith(expectedPath)
+    expect(mockFs.unlink).toHaveBeenCalledWith('/tmp/test-kotha-app/kotha.db')
   })
 })
 

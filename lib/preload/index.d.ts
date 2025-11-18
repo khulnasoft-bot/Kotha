@@ -19,24 +19,6 @@ interface UpdaterAPI {
   installUpdate: () => void
 }
 
-interface SelectedTextOptions {
-  format?: 'json' | 'text'
-  maxLength?: number
-}
-
-interface SelectedTextResult {
-  success: boolean
-  text: string | null
-  error: string | null
-  length: number
-}
-
-interface SelectedTextAPI {
-  get: (options?: SelectedTextOptions) => Promise<SelectedTextResult>
-  getString: (maxLength?: number) => Promise<string | null>
-  hasSelected: () => Promise<boolean>
-}
-
 declare global {
   interface Window {
     electron: ElectronAPI & {
@@ -91,24 +73,12 @@ declare global {
         getVisibility: () => Promise<{ isVisible: boolean }>
       }
       notifySettingsUpdate: (settings: any) => void
-      notifyOnboardingUpdate: (onboarding: any) => void
-      notifyUserAuthUpdate: (authUser: any) => void
-
-      getOnboardingState: () => Promise<{
-        onboardingStep?: number
-        onboardingCompleted?: boolean
-      } | null>
-
-      // Analytics device ID methods
-      'analytics:get-device-id': () => Promise<string | undefined>
-
       notifyLoginSuccess: (
         profile: any,
         idToken: string | null,
         accessToken: string | null,
       ) => Promise<void>
       deleteUserData: () => Promise<void>
-      selectedText: SelectedTextAPI
     }
   }
 }

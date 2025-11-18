@@ -128,10 +128,9 @@
 .window-titlebar-controls {
   display: flex;
   position: absolute;
-  left: 0;
+  right: 0;
   top: 0;
   -webkit-app-region: no-drag;
-  z-index: 20;
 }
 
 .window-titlebar-menu {

@@ -1,12 +1,10 @@
 import { describe, test, expect, beforeEach, mock, Mock } from 'bun:test'
 import { ActiveWindow } from '../media/active-application'
-import { KothaMode } from '@/app/generated/kotha_pb'
 
 // Mock external dependencies to focus on core grpcClient logic
 const mockElectronWindow = {
   webContents: {
     send: mock(),
-    isDestroyed: mock(() => false),
   },
   isDestroyed: mock(() => false),
 } as any
@@ -95,10 +93,6 @@ mock.module('../auth/events', () => ({
 
 mock.module('../auth/config', () => ({
   Auth0Config: { domain: 'test.auth0.com' },
-}))
-
-mock.module('../media/selected-text-reader', () => ({
-  getSelectedTextString: mock(() => Promise.resolve('Selected text')),
 }))
 
 const mockGetActiveWindow: Mock<() => Promise<ActiveWindow | null>> = mock(() =>
@@ -236,12 +230,14 @@ describe('GrpcClient Business Logic Tests', () => {
         yield { data: new Uint8Array([4, 5, 6]) } as any
       })()
 
-      const result = await grpcClient.transcribeStream(
-        audioStream,
-        KothaMode.TRANSCRIBE,
-      )
+      const result = await grpcClient.transcribeStream(audioStream)
 
       expect(result.transcript).toBe(transcript)
+      expect(mockSetFocusedText).toHaveBeenCalledWith(transcript)
+      expect(mockElectronWindow.webContents.send).toHaveBeenCalledWith(
+        'transcription-result',
+        { transcript },
+      )
     })
 
     test('should include metadata in transcription', async () => {
@@ -252,7 +248,7 @@ describe('GrpcClient Business Logic Tests', () => {
         yield { data: new Uint8Array([1, 2, 3]) } as any
       })()
 
-      await grpcClient.transcribeStream(audioStream, KothaMode.TRANSCRIBE)
+      await grpcClient.transcribeStream(audioStream)
 
       expect(mockDictionaryTable.findAll).toHaveBeenCalledWith('test-user-123')
       expect(mockGrpcClientMethods.transcribeStream).toHaveBeenCalled()
@@ -269,7 +265,7 @@ describe('GrpcClient Business Logic Tests', () => {
 
       mockGetActiveWindow.mockResolvedValueOnce(null)
 
-      await grpcClient.transcribeStream(audioStream, KothaMode.TRANSCRIBE)
+      await grpcClient.transcribeStream(audioStream)
       expect(mockGetActiveWindow).toHaveBeenCalled()
     })
 
@@ -285,9 +281,53 @@ describe('GrpcClient Business Logic Tests', () => {
         yield { data: new Uint8Array([1, 2, 3]) } as any
       })()
 
-      expect(
-        grpcClient.transcribeStream(audioStream, KothaMode.TRANSCRIBE),
-      ).rejects.toThrow('Transcription failed')
+      expect(grpcClient.transcribeStream(audioStream)).rejects.toThrow(
+        'Transcription failed',
+      )
+      expect(mockElectronWindow.webContents.send).toHaveBeenCalledWith(
+        'transcription-error',
+        error,
+      )
+    })
+
+    test('should not set focused text for empty transcript', async () => {
+      const { grpcClient } = await import('./grpcClient')
+      grpcClient.setAuthToken('test-token')
+
+      mockGrpcClientMethods.transcribeStream.mockResolvedValueOnce({
+        transcript: '',
+      })
+
+      const audioStream = (async function* () {
+        yield { data: new Uint8Array([1, 2, 3]) } as any
+      })()
+
+      await grpcClient.transcribeStream(audioStream)
+
+      expect(mockSetFocusedText).not.toHaveBeenCalled()
+    })
+
+    test('should not set focused text for error', async () => {
+      const { grpcClient } = await import('./grpcClient')
+      grpcClient.setAuthToken('test-token')
+
+      mockGrpcClientMethods.transcribeStream.mockResolvedValueOnce({
+        transcript: 'Some transcript',
+        error: {
+          code: 'CLIENT_NO_SPEECH_DETECTED',
+          type: 'audio',
+          message: 'No speech detected in audio.',
+          provider: 'groq',
+        },
+      })
+
+      const audioStream = (async function* () {
+        yield { data: new Uint8Array([1, 2, 3]) } as any
+      })()
+
+      await grpcClient.transcribeStream(audioStream)
+
+      expect(mockSetFocusedText).not.toHaveBeenCalled()
     })
 
     test('should handle vocabulary fetch errors during transcription', async () => {
@@ -302,8 +342,52 @@ describe('GrpcClient Business Logic Tests', () => {
         yield { data: new Uint8Array([1, 2, 3]) } as any
       })()
 
-      await grpcClient.transcribeStream(audioStream, KothaMode.TRANSCRIBE)
+      await grpcClient.transcribeStream(audioStream)
       expect(mockGrpcClientMethods.transcribeStream).toHaveBeenCalled()
+    })
+
+    test('should handle window operations when window is destroyed', async () => {
+      const { grpcClient } = await import('./grpcClient')
+      grpcClient.setAuthToken('test-token')
+      grpcClient.setMainWindow(mockElectronWindow)
+
+      mockElectronWindow.isDestroyed.mockReturnValue(true)
+
+      const transcript = 'Test transcript'
+      mockGrpcClientMethods.transcribeStream.mockResolvedValueOnce({
+        transcript,
+      })
+
+      const audioStream = (async function* () {
+        yield { data: new Uint8Array([1, 2, 3]) } as any
+      })()
+
+      await grpcClient.transcribeStream(audioStream)
+
+      expect(mockSetFocusedText).toHaveBeenCalledWith(transcript)
+      expect(mockElectronWindow.webContents.send).toHaveBeenCalledWith(
+        'transcription-result',
+        { transcript },
+      )
+    })
+
+    test('should handle null window gracefully', async () => {
+      const { grpcClient } = await import('./grpcClient')
+      grpcClient.setAuthToken('test-token')
+      grpcClient.setMainWindow(null as any)
+
+      const transcript = 'Test transcript'
+      mockGrpcClientMethods.transcribeStream.mockResolvedValueOnce({
+        transcript,
+      })
+
+      const audioStream = (async function* () {
+        yield { data: new Uint8Array([1, 2, 3]) } as any
+      })()
+
+      await grpcClient.transcribeStream(audioStream)
+
+      expect(mockSetFocusedText).toHaveBeenCalledWith(transcript)
     })
   })
 
@@ -325,29 +409,6 @@ describe('GrpcClient Business Logic Tests', () => {
       // Should proceed with operation (empty headers but no crash)
       const result = await grpcClient.createNote(testNote)
       expect(result).toBeDefined()
-    })
-
-    test('should handle auth errors gracefully when window is destroyed', async () => {
-      const { grpcClient } = await import('./grpcClient')
-      grpcClient.setAuthToken('test-token')
-      grpcClient.setMainWindow(mockElectronWindow)
-
-      // Mock window as destroyed
-      mockElectronWindow.isDestroyed.mockReturnValue(true)
-
-      // Mock authentication error
-      const authError = new Error('Unauthenticated')
-      mockGrpcClientMethods.transcribeStream.mockRejectedValueOnce(authError)
-
-      const audioStream = (async function* () {
-        yield { data: new Uint8Array([1, 2, 3]) } as any
-      })()
-
-      // Should not crash when trying to send auth error to destroyed window
-      await expect(
-        grpcClient.transcribeStream(audioStream, KothaMode.TRANSCRIBE),
-      ).rejects.toThrow('Unauthenticated')
-      expect(mockElectronWindow.webContents.send).not.toHaveBeenCalled()
     })
   })
 })

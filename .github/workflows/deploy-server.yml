@@ -1,4 +1,4 @@
-name: Deploy Server Workflow
+name: Deploy Server Worfklow
 
 on:
   workflow_call:

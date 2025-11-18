@@ -14,14 +14,10 @@ import {
   DialogFooter,
 } from '../../ui/dialog'
 import { Button } from '../../ui/button'
-import { KothaMode } from '@/app/generated/kotha_pb'
-import { getKeyDisplayInfo } from '@/lib/types/keyboard'
-import { usePlatform } from '@/app/hooks/usePlatform'
 
 export default function NotesContent() {
   const { notes, loadNotes, addNote, deleteNote, updateNote } = useNotesStore()
-  const { getKothaModeShortcuts } = useSettingsStore()
-  const keyboardShortcut = getKothaModeShortcuts(KothaMode.TRANSCRIBE)[0].keys
+  const { keyboardShortcut } = useSettingsStore()
   const [creatingNote, setCreatingNote] = useState(false)
   const [showAddNoteButton, setShowAddNoteButton] = useState(false)
   const [noteContent, setNoteContent] = useState('')
@@ -44,7 +40,6 @@ export default function NotesContent() {
   } | null>(null)
   const [editContent, setEditContent] = useState('')
   const editTextareaRef = useRef<HTMLTextAreaElement>(null)
-  const platform = usePlatform()
 
   useEffect(() => {
     loadNotes()
@@ -359,7 +354,7 @@ export default function NotesContent() {
             onChange={e => updateNoteContent(e.target.value)}
             onClick={() => setCreatingNote(true)}
             onBlur={handleBlur}
-            placeholder={`${creatingNote ? `Press and hold ${keyboardShortcut.map(k => getKeyDisplayInfo(k, platform).label).join(' + ')} and start speaking` : ''}`}
+            placeholder={`${creatingNote ? `Press and hold ${keyboardShortcut.join(' + ')} and start speaking` : ''}`}
           />
           {showAddNoteButton && (
             <div className="absolute bottom-3 right-3">

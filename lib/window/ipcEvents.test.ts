@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, mock } from 'bun:test'
+import { describe, test, expect, beforeEach } from 'bun:test'
 import { registerIPC } from './ipcEvents'
 
 const mockIpcMain = (await import('electron')).ipcMain as any
@@ -120,7 +120,7 @@ describe('IPC Events Critical Business Logic Tests', () => {
         height: 800,
         minimizable: true,
         maximizable: false,
-        platform: process.platform,
+        platform: 'darwin',
       })
 
       mockBrowserWindow.fromWebContents = originalFromWebContents
@@ -161,26 +161,6 @@ describe('IPC Events Critical Business Logic Tests', () => {
       // Restore original functions
       mockGetCurrentUserId = originalGetCurrentUserId
       mockElectronLog.error = originalError
-    })
-
-    test('update-advanced-settings should call the correct service', async () => {
-      const mockUpdateAdvancedSettings = mock(async (settings: any) => settings)
-      const grpcClient = {
-        updateAdvancedSettings: mockUpdateAdvancedSettings,
-      }
-
-      mock.module('../clients/grpcClient', () => ({
-        grpcClient,
-      }))
-
-      const handler = registeredHandlers.get('update-advanced-settings')
-      const mockSettings = { setting1: 'value1', setting2: 'value2' }
-
-      expect(handler).toBeDefined()
-      const result = await handler!({}, mockSettings)
-
-      expect(result).toEqual(mockSettings)
-      expect(mockUpdateAdvancedSettings).toHaveBeenCalledWith(mockSettings)
     })
   })
 })

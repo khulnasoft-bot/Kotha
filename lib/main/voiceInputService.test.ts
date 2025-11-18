@@ -23,16 +23,12 @@ mock.module('../media/systemAudio', () => ({
 const mockPillWindow = {
   webContents: {
     send: mock(),
-    isDestroyed: mock(() => false),
   },
-  isDestroyed: mock(() => false),
 }
 const mockMainWindow = {
   webContents: {
     send: mock(),
-    isDestroyed: mock(() => false),
   },
-  isDestroyed: mock(() => false),
 }
 mock.module('./app', () => ({
   getPillWindow: mock(() => mockPillWindow),
@@ -71,7 +67,6 @@ beforeEach(() => {
 
 import { voiceInputService } from './voiceInputService'
 import { STORE_KEYS } from '../constants/store-keys'
-import { KothaMode } from '@/app/generated/kotha_pb'
 
 describe('VoiceInputService Integration Tests', () => {
   beforeEach(() => {
@@ -93,9 +88,6 @@ describe('VoiceInputService Integration Tests', () => {
     mockTranscriptionService.stopTranscription.mockClear()
     mockTranscriptionService.handleAudioChunk.mockClear()
 
-    // Default behavior: transcription starts successfully
-    mockTranscriptionService.startTranscription.mockResolvedValue(true)
-
     // Setup default store values
     mockStore.get.mockImplementation((key: string) => {
       if (key === STORE_KEYS.SETTINGS) {
@@ -109,14 +101,14 @@ describe('VoiceInputService Integration Tests', () => {
   })
 
   describe('STT Service Lifecycle', () => {
-    test('should start STT service with all components', async () => {
+    test('should start STT service with all components', () => {
       const testDeviceId = 'test-microphone-device'
       mockStore.get.mockReturnValue({
         microphoneDeviceId: testDeviceId,
         muteAudioWhenDictating: false,
       })
 
-      await voiceInputService.startSTTService(KothaMode.TRANSCRIBE)
+      voiceInputService.startSTTService(true)
 
       // Verify transcription service started
       expect(mockTranscriptionService.startTranscription).toHaveBeenCalledTimes(
@@ -134,7 +126,6 @@ describe('VoiceInputService Integration Tests', () => {
         {
           isRecording: true,
           deviceId: testDeviceId,
-          mode: KothaMode.TRANSCRIBE,
         },
       )
 
@@ -142,26 +133,44 @@ describe('VoiceInputService Integration Tests', () => {
       expect(mockMuteSystemAudio).not.toHaveBeenCalled()
     })
 
-    test('should mute system audio when configured', async () => {
+    test('should start STT service without server transcription', () => {
+      voiceInputService.startSTTService(false)
+
+      // Transcription service should not be started
+      expect(mockTranscriptionService.startTranscription).not.toHaveBeenCalled()
+
+      // Audio recorder should still start
+      expect(mockAudioRecorderService.startRecording).toHaveBeenCalled()
+
+      // Pill window should still be notified
+      expect(mockPillWindow.webContents.send).toHaveBeenCalledWith(
+        'recording-state-update',
+        expect.objectContaining({
+          isRecording: true,
+        }),
+      )
+    })
+
+    test('should mute system audio when configured', () => {
       mockStore.get.mockReturnValue({
         microphoneDeviceId: 'test-device',
         muteAudioWhenDictating: true,
       })
 
-      await voiceInputService.startSTTService(KothaMode.TRANSCRIBE)
+      voiceInputService.startSTTService()
 
       // System audio should be muted
       expect(mockMuteSystemAudio).toHaveBeenCalledTimes(1)
     })
 
-    test('should stop STT service and clean up resources', async () => {
+    test('should stop STT service and clean up resources', () => {
       // First start the service
       mockStore.get.mockReturnValue({
         microphoneDeviceId: 'test-device',
         muteAudioWhenDictating: true,
       })
 
-      await voiceInputService.startSTTService(KothaMode.TRANSCRIBE)
+      voiceInputService.startSTTService()
 
       // Reset mocks to track stop calls
       mockStore.get.mockClear()
@@ -169,8 +178,8 @@ describe('VoiceInputService Integration Tests', () => {
         muteAudioWhenDictating: true,
       })
 
-      // Stop the service (await async stop flow)
-      await voiceInputService.stopSTTService()
+      // Stop the service
+      voiceInputService.stopSTTService()
 
       // Verify audio recorder stopped
       expect(mockAudioRecorderService.stopRecording).toHaveBeenCalledTimes(1)
@@ -193,12 +202,12 @@ describe('VoiceInputService Integration Tests', () => {
       )
     })
 
-    test('should not unmute audio if muting was disabled', async () => {
+    test('should not unmute audio if muting was disabled', () => {
       mockStore.get.mockReturnValue({
         muteAudioWhenDictating: false,
       })
 
-      await voiceInputService.stopSTTService()
+      voiceInputService.stopSTTService()
 
       // System audio should not be unmuted
       expect(mockUnmuteSystemAudio).not.toHaveBeenCalled()
@@ -269,41 +278,17 @@ describe('VoiceInputService Integration Tests', () => {
       // Test passes if no exception is thrown
       expect(true).toBe(true)
     })
-
-    test('should not send to main window when it is destroyed', () => {
-      voiceInputService.setUpAudioRecorderListeners()
-
-      const volumeUpdateHandler = mockAudioRecorderService.on.mock.calls.find(
-        call => call[0] === 'volume-update',
-      )?.[1]
-
-      expect(volumeUpdateHandler).toBeDefined()
-
-      // Simulate main window destroyed
-      mockMainWindow.isDestroyed.mockReturnValueOnce(true)
-
-      const testVolume = 0.42
-      volumeUpdateHandler(testVolume)
-
-      // Pill window should still receive the update
-      expect(mockPillWindow.webContents.send).toHaveBeenCalledWith(
-        'volume-update',
-        testVolume,
-      )
-      // Main window should not receive the update
-      expect(mockMainWindow.webContents.send).not.toHaveBeenCalled()
-    })
   })
 
   describe('Device Management', () => {
-    test('should use device ID from settings', async () => {
+    test('should use device ID from settings', () => {
       const customDeviceId = 'custom-microphone-device-456'
       mockStore.get.mockReturnValue({
         microphoneDeviceId: customDeviceId,
         muteAudioWhenDictating: false,
       })
 
-      await voiceInputService.startSTTService(KothaMode.TRANSCRIBE)
+      voiceInputService.startSTTService()
 
       expect(mockAudioRecorderService.startRecording).toHaveBeenCalledWith(
         customDeviceId,
@@ -316,13 +301,13 @@ describe('VoiceInputService Integration Tests', () => {
       )
     })
 
-    test('should handle missing device ID gracefully', async () => {
+    test('should handle missing device ID gracefully', () => {
       mockStore.get.mockReturnValue({
         // Missing microphoneDeviceId
         muteAudioWhenDictating: false,
       })
 
-      await voiceInputService.startSTTService(KothaMode.TRANSCRIBE)
+      voiceInputService.startSTTService()
 
       // Should still start recording (with undefined device ID)
       expect(mockAudioRecorderService.startRecording).toHaveBeenCalledWith(
@@ -330,11 +315,11 @@ describe('VoiceInputService Integration Tests', () => {
       )
     })
 
-    test('should handle missing settings gracefully', async () => {
+    test('should handle missing settings gracefully', () => {
       // Return empty object instead of null to avoid accessing properties on null
       mockStore.get.mockReturnValue({})
 
-      await voiceInputService.startSTTService(KothaMode.TRANSCRIBE)
+      voiceInputService.startSTTService()
 
       // Should still start recording (with undefined device ID)
       expect(mockAudioRecorderService.startRecording).toHaveBeenCalledWith(
@@ -347,7 +332,7 @@ describe('VoiceInputService Integration Tests', () => {
   })
 
   describe('Integration Scenarios', () => {
-    test('should coordinate complete recording session', async () => {
+    test('should coordinate complete recording session', () => {
       const deviceId = 'session-test-device'
       mockStore.get.mockReturnValue({
         microphoneDeviceId: deviceId,
@@ -358,7 +343,7 @@ describe('VoiceInputService Integration Tests', () => {
       voiceInputService.setUpAudioRecorderListeners()
 
       // Start recording session
-      await voiceInputService.startSTTService(KothaMode.TRANSCRIBE)
+      voiceInputService.startSTTService(true)
 
       // Simulate audio events during recording
       const audioChunkHandler = mockAudioRecorderService.on.mock.calls.find(
@@ -378,8 +363,8 @@ describe('VoiceInputService Integration Tests', () => {
       mockStore.get.mockClear()
       mockStore.get.mockReturnValue({ muteAudioWhenDictating: true })
 
-      // Stop recording session (await async stop flow)
-      await voiceInputService.stopSTTService()
+      // Stop recording session
+      voiceInputService.stopSTTService()
 
       // Verify complete flow
       expect(mockMuteSystemAudio).toHaveBeenCalledTimes(1)
@@ -418,7 +403,7 @@ describe('VoiceInputService Integration Tests', () => {
       })
 
       // Should not crash when window is unavailable (optional chaining handles this)
-      await voiceInputService.startSTTService(KothaMode.TRANSCRIBE)
+      expect(() => voiceInputService.startSTTService()).not.toThrow()
 
       // Core audio services should still work
       expect(mockAudioRecorderService.startRecording).toHaveBeenCalledWith(
@@ -434,13 +419,13 @@ describe('VoiceInputService Integration Tests', () => {
   })
 
   describe('Service State Management Business Logic', () => {
-    test('should handle stopping service without starting', async () => {
+    test('should handle stopping service without starting', () => {
       mockStore.get.mockReturnValue({
         muteAudioWhenDictating: false,
       })
 
       // Should not crash when stopping without starting
-      await expect(voiceInputService.stopSTTService()).resolves.toBeUndefined()
+      expect(() => voiceInputService.stopSTTService()).not.toThrow()
 
       // Cleanup calls should still happen
       expect(mockAudioRecorderService.stopRecording).toHaveBeenCalledTimes(1)
@@ -449,16 +434,18 @@ describe('VoiceInputService Integration Tests', () => {
       )
     })
 
-    test('should handle multiple consecutive starts', async () => {
+    test('should handle multiple consecutive starts', () => {
       mockStore.get.mockReturnValue({
         microphoneDeviceId: 'test-device',
         muteAudioWhenDictating: false,
       })
 
       // Should not crash when starting multiple times
-      await voiceInputService.startSTTService(KothaMode.TRANSCRIBE)
-      await voiceInputService.startSTTService(KothaMode.TRANSCRIBE)
-      await voiceInputService.startSTTService(KothaMode.TRANSCRIBE)
+      expect(() => {
+        voiceInputService.startSTTService()
+        voiceInputService.startSTTService()
+        voiceInputService.startSTTService()
+      }).not.toThrow()
 
       // Each start should call the services
       expect(mockAudioRecorderService.startRecording).toHaveBeenCalledTimes(3)
@@ -467,21 +454,21 @@ describe('VoiceInputService Integration Tests', () => {
       )
     })
 
-    test('should handle stop after multiple starts correctly', async () => {
+    test('should handle stop after multiple starts correctly', () => {
       mockStore.get.mockReturnValue({
         microphoneDeviceId: 'test-device',
         muteAudioWhenDictating: true,
       })
 
       // Start multiple times, then stop once
-      voiceInputService.startSTTService(KothaMode.TRANSCRIBE)
-      voiceInputService.startSTTService(KothaMode.TRANSCRIBE)
+      voiceInputService.startSTTService()
+      voiceInputService.startSTTService()
 
       // Reset mocks to track stop behavior
       mockStore.get.mockClear()
       mockStore.get.mockReturnValue({ muteAudioWhenDictating: true })
 
-      await voiceInputService.stopSTTService()
+      voiceInputService.stopSTTService()
 
       // Stop should work regardless of multiple starts
       expect(mockAudioRecorderService.stopRecording).toHaveBeenCalledTimes(1)

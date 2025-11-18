@@ -8,6 +8,7 @@ import { useAuthStore } from '@/app/store/useAuthStore'
 import { useAuth } from '@/app/components/auth/useAuth'
 
 export const Titlebar = () => {
+  const { icon } = useWindowContext().titlebar
   const { onboardingCompleted } = useOnboardingStore()
   const { isAuthenticated } = useAuthStore()
   const showOnboarding = !onboardingCompleted || !isAuthenticated
@@ -34,17 +35,6 @@ export const Titlebar = () => {
   }, [showUserDropdown])
 
   useEffect(() => {
-    // Check current update status on mount
-    window.api.updater.getUpdateStatus().then(status => {
-      if (status.updateAvailable) {
-        setIsUpdateAvailable(true)
-      }
-      if (status.updateDownloaded) {
-        setUpdateDownloaded(true)
-      }
-    })
-
-    // Listen for future update events
     window.api.updater.onUpdateAvailable(() => {
       setIsUpdateAvailable(true)
     })
@@ -124,6 +114,14 @@ export const Titlebar = () => {
           >
             <PanelLeft style={{ width: 20, height: 20 }} />
           </div>
+        </div>
+      )}
+      {wcontext?.platform === 'win32' && (
+        <div
+          className="window-titlebar-icon"
+          style={onboardingCompleted ? { left: 36 } : {}}
+        >
+          <img src={icon} />
         </div>
       )}
 
@@ -221,13 +219,13 @@ const TitlebarControls = () => {
 
   return (
     <div className="window-titlebar-controls">
-      <TitlebarControlButton label="close" svgPath={closePath} />
-      {wcontext?.maximizable && (
-        <TitlebarControlButton label="maximize" svgPath={maximizePath} />
-      )}
       {wcontext?.minimizable && (
         <TitlebarControlButton label="minimize" svgPath={minimizePath} />
       )}
+      {wcontext?.maximizable && (
+        <TitlebarControlButton label="maximize" svgPath={maximizePath} />
+      )}
+      <TitlebarControlButton label="close" svgPath={closePath} />
     </div>
   )
 }

@@ -4,16 +4,11 @@ import { getPillWindow, mainWindow } from './app'
 import store from './store'
 import { STORE_KEYS } from '../constants/store-keys'
 import { transcriptionService } from './transcriptionService'
-import { KothaMode } from '@/app/generated/kotha_pb'
-import { IPC_EVENTS, RecordingStatePayload } from '../types/ipc'
+import { traceLogger } from './traceLogger'
 
 export class VoiceInputService {
-  public startSTTService = async (mode: KothaMode) => {
-    console.info(
-      '[Audio] Starting STT service with mode:',
-      mode,
-      mode === KothaMode.EDIT ? 'EDIT' : 'TRANSCRIBE',
-    )
+  public startSTTService = (sendToServer: boolean = true) => {
+    console.info('[Audio] Starting STT service')
     const deviceId = store.get(STORE_KEYS.SETTINGS).microphoneDeviceId
 
     const settings = store.get(STORE_KEYS.SETTINGS)
@@ -22,35 +17,38 @@ export class VoiceInputService {
       muteSystemAudio()
     }
 
-    const started = await transcriptionService.startTranscription(mode)
-    if (!started) {
-      console.warn(
-        '[Audio] Transcription did not start, skipping recorder start',
-      )
-      return
+    // Get current interaction ID for trace logging
+    const interactionId = (globalThis as any).currentInteractionId
+    if (interactionId) {
+      traceLogger.logStep(interactionId, 'VOICE_INPUT_START', {
+        deviceId,
+        sendToServer,
+        muteAudioWhenDictating: settings?.muteAudioWhenDictating,
+      })
+    }
+
+    if (sendToServer) {
+      transcriptionService.startTranscription()
     }
     audioRecorderService.startRecording(deviceId)
 
-    const recordingStatePayload: RecordingStatePayload = {
+    getPillWindow()?.webContents.send('recording-state-update', {
       isRecording: true,
       deviceId,
-      mode,
-    }
-    getPillWindow()?.webContents.send(
-      IPC_EVENTS.RECORDING_STATE_UPDATE,
-      recordingStatePayload,
-    )
+    })
   }
 
-  public stopSTTService = async () => {
-    audioRecorderService.stopRecording()
-
-    // Wait for explicit drain-complete signal from the recorder (with timeout fallback)
-    try {
-      await (audioRecorderService as any).awaitDrainComplete?.(500)
-    } catch (e) {
-      console.warn('[Audio] drain-complete wait failed, proceeding:', e)
+  public stopSTTService = () => {
+    // Get current interaction ID for trace logging
+    const interactionId = (globalThis as any).currentInteractionId
+    if (interactionId) {
+      traceLogger.logStep(interactionId, 'VOICE_INPUT_STOP', {
+        muteAudioWhenDictating: store.get(STORE_KEYS.SETTINGS)
+          .muteAudioWhenDictating,
+      })
     }
+
+    audioRecorderService.stopRecording()
 
     transcriptionService.stopTranscription()
 
@@ -59,38 +57,20 @@ export class VoiceInputService {
       unmuteSystemAudio()
     }
 
-    const recordingStatePayload: RecordingStatePayload = {
+    getPillWindow()?.webContents.send('recording-state-update', {
       isRecording: false,
       deviceId: '',
-    }
-    getPillWindow()?.webContents.send(
-      IPC_EVENTS.RECORDING_STATE_UPDATE,
-      recordingStatePayload,
-    )
+    })
   }
 
   public setUpAudioRecorderListeners = () => {
-    audioRecorderService.on(
-      'audio-config',
-      ({ outputSampleRate, sampleRate }: any) => {
-        // Use the recorder's effective output rate (matches the PCM we store)
-        const effectiveRate = outputSampleRate || sampleRate || 16000
-        transcriptionService.setAudioConfig({ sampleRate: effectiveRate })
-      },
-    )
     audioRecorderService.on('audio-chunk', chunk => {
       transcriptionService.handleAudioChunk(chunk)
     })
 
     audioRecorderService.on('volume-update', volume => {
-      getPillWindow()?.webContents.send(IPC_EVENTS.VOLUME_UPDATE, volume)
-      if (
-        mainWindow &&
-        !mainWindow.isDestroyed() &&
-        !mainWindow.webContents.isDestroyed()
-      ) {
-        mainWindow.webContents.send(IPC_EVENTS.VOLUME_UPDATE, volume)
-      }
+      getPillWindow()?.webContents.send('volume-update', volume)
+      mainWindow?.webContents.send('volume-update', volume)
     })
 
     audioRecorderService.on('error', err => {
@@ -99,14 +79,6 @@ export class VoiceInputService {
     })
 
     audioRecorderService.initialize()
-  }
-
-  /**
-   * Call this when microphone selection changes to update the transcription
-   * config with the effective output sample rate for the chosen device.
-   */
-  public handleMicrophoneChanged = (deviceId: string) => {
-    audioRecorderService.requestDeviceConfig(deviceId)
   }
 }
 

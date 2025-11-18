@@ -123,6 +123,22 @@ export default function DictionaryContent() {
 
     try {
       if (editingEntry.type === 'normal' && editContent.trim() !== '') {
+        // Check for duplicate content in other normal entries (excluding current entry)
+        const duplicateEntry = entries.find(
+          entry =>
+            entry.id !== editingEntry.id &&
+            entry.type === 'normal' &&
+            entry.content.toLowerCase() === editContent.trim().toLowerCase(),
+        )
+
+        if (duplicateEntry) {
+          setErrorMessage(
+            `"${editContent.trim()}" already exists in your dictionary`,
+          )
+          setStatusIndicator('error')
+          return
+        }
+
         await updateEntry(editingEntry.id, {
           type: 'normal',
           content: editContent.trim(),
@@ -137,6 +153,22 @@ export default function DictionaryContent() {
         editFrom.trim() !== '' &&
         editTo.trim() !== ''
       ) {
+        // Check for duplicate "from" word in other replacements (excluding current entry)
+        const duplicateReplacement = entries.find(
+          entry =>
+            entry.id !== editingEntry.id &&
+            entry.type === 'replacement' &&
+            entry.from.toLowerCase() === editFrom.trim().toLowerCase(),
+        )
+
+        if (duplicateReplacement) {
+          setErrorMessage(
+            `"${editFrom.trim()}" already exists in your dictionary`,
+          )
+          setStatusIndicator('error')
+          return
+        }
+
         await updateEntry(editingEntry.id, {
           type: 'replacement',
           from: editFrom.trim(),
@@ -151,10 +183,9 @@ export default function DictionaryContent() {
         )
         setStatusIndicator('success')
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Failed to update dictionary entry:', error)
-      const errorMsg = error?.message || 'Failed to update dictionary entry'
-      setErrorMessage(errorMsg)
+      setErrorMessage('Failed to update dictionary entry')
       setStatusIndicator('error')
     }
   }
@@ -199,6 +230,21 @@ export default function DictionaryContent() {
     try {
       if (isReplacement) {
         if (newFrom.trim() !== '' && newTo.trim() !== '') {
+          // Check for duplicate "from" word in existing replacements
+          const duplicateReplacement = entries.find(
+            entry =>
+              entry.type === 'replacement' &&
+              entry.from.toLowerCase() === newFrom.trim().toLowerCase(),
+          )
+
+          if (duplicateReplacement) {
+            setErrorMessage(
+              `"${newFrom.trim()}" already exists in your dictionary`,
+            )
+            setStatusIndicator('error')
+            return
+          }
+
           await addReplacement(newFrom.trim(), newTo.trim())
           setShowAddDialog(false)
           setNewFrom('')
@@ -211,6 +257,22 @@ export default function DictionaryContent() {
         }
       } else {
         if (newEntryContent.trim() !== '') {
+          // Check for duplicate content in existing normal entries
+          const duplicateEntry = entries.find(
+            entry =>
+              entry.type === 'normal' &&
+              entry.content.toLowerCase() ===
+                newEntryContent.trim().toLowerCase(),
+          )
+
+          if (duplicateEntry) {
+            setErrorMessage(
+              `"${newEntryContent.trim()}" already exists in your dictionary`,
+            )
+            setStatusIndicator('error')
+            return
+          }
+
           await addEntry(newEntryContent.trim())
           setShowAddDialog(false)
           setNewEntryContent('')
@@ -219,10 +281,9 @@ export default function DictionaryContent() {
           setStatusIndicator('success')
         }
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Failed to add dictionary entry:', error)
-      const errorMsg = error?.message || 'Failed to add dictionary entry'
-      setErrorMessage(errorMsg)
+      setErrorMessage('Failed to add dictionary entry')
       setStatusIndicator('error')
     }
   }
