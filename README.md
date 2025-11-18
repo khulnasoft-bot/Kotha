@@ -1,5 +1,3 @@
-# <div align="center">✨ কথা (Kotha) ✨</div>
-
 <div align="center">
   <img src="resources/build/kotha.svg" width="150" height="150" alt="কথা লোগো" />
 
